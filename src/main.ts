@@ -29,7 +29,7 @@ async function resolveValue(value: any, modeId: string, visited: Set<string> = n
   return String(value);
 }
 
-// 顏色轉換函式
+// 顏色轉換函式：Figma RGB 轉 HEX
 function figmaColorToHex(color: RGB | RGBA): string {
   if (!color) return "";
   const r = Math.round(color.r * 255).toString(16).padStart(2, '0');
@@ -39,6 +39,37 @@ function figmaColorToHex(color: RGB | RGBA): string {
     ? Math.round((color as RGBA).a * 255).toString(16).padStart(2, '0') 
     : "FF";
   return `#${r}${g}${b}${a}`.toUpperCase();
+}
+
+// 顏色轉換函式：將各種格式轉為 Figma RGB/RGBA
+function parseToFigmaColor(input: string): RGB | RGBA {
+  if (input.startsWith('rgba')) {
+    const match = input.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/);
+    if (match) {
+      return {
+        r: parseInt(match[1]) / 255,
+        g: parseInt(match[2]) / 255,
+        b: parseInt(match[3]) / 255,
+        a: match[4] ? parseFloat(match[4]) : 1
+      };
+    }
+  }
+
+  let hex = input.replace('#', '');
+  if (hex.length === 3) {
+    hex = hex.split('').map(char => char + char).join('');
+  }
+  
+  const r = parseInt(hex.substring(0, 2), 16) / 255 || 0;
+  const g = parseInt(hex.substring(2, 4), 16) / 255 || 0;
+  const b = parseInt(hex.substring(4, 6), 16) / 255 || 0;
+  
+  if (hex.length === 8) {
+    const a = parseInt(hex.substring(6, 8), 16) / 255;
+    return { r, g, b, a };
+  }
+  
+  return { r, g, b };
 }
 
 // 核心邏輯：讀取所有可用變數
@@ -116,11 +147,12 @@ async function refreshVariables() {
                     });
                  }
 
-                 resolvedVars.push({
-                    name: v.name,
-                    values: valuesByMode, // 傳送多個模式的值
-                    type: v.resolvedType
-                 });
+                  resolvedVars.push({
+                     id: v.id, // 傳送 ID 供修改使用
+                     name: v.name,
+                     values: valuesByMode, // 傳送多個模式的值
+                     type: v.resolvedType
+                  });
               }
           } catch(err) {
               console.error(`Error processing variable ${id}:`, err);
@@ -162,6 +194,60 @@ figma.ui.onmessage = async (msg) => {
     await refreshVariables();
   }
   
+  // 更新變數值
+  if (msg.type === 'update-variable') {
+    const { variableId, modeId, newValue, varType } = msg;
+    try {
+      const v = await figma.variables.getVariableByIdAsync(variableId);
+      if (v) {
+        if (varType === 'COLOR') {
+          v.setValueForMode(modeId, parseToFigmaColor(newValue));
+        } else if (varType === 'FLOAT') {
+          v.setValueForMode(modeId, parseFloat(newValue));
+        } else if (varType === 'BOOLEAN') {
+          v.setValueForMode(modeId, newValue === 'true' || newValue === true);
+        } else {
+          v.setValueForMode(modeId, newValue);
+        }
+        // 更新成功後通知 UI (或者不通知，讓使用者手動 refresh)
+        // 這裡我們自動 refresh 一次以反映最新狀態
+        await refreshVariables();
+      }
+    } catch (e) {
+      console.error("Failed to update variable:", e);
+    }
+  }
+
+  // 修改變數名稱
+  if (msg.type === 'rename-variable') {
+    const { variableId, newName } = msg;
+    try {
+      const v = await figma.variables.getVariableByIdAsync(variableId);
+      if (v) {
+        v.name = newName;
+        await refreshVariables();
+        figma.notify(`Renamed to ${newName}`);
+      }
+    } catch (e) {
+      console.error("Failed to rename variable:", e);
+    }
+  }
+
+  // 設定變數連結 (Alias)
+  if (msg.type === 'set-variable-alias') {
+    const { variableId, modeId, targetVariableId } = msg;
+    try {
+      const v = await figma.variables.getVariableByIdAsync(variableId);
+      if (v) {
+        v.setValueForMode(modeId, { type: 'VARIABLE_ALIAS', id: targetVariableId });
+        await refreshVariables();
+        figma.notify("Variable linked");
+      }
+    } catch (e) {
+      console.error("Failed to set alias:", e);
+    }
+  }
+
   // 處理視窗縮放
   if (msg.type === 'resize-ui') {
     const w = Math.max(500, Math.min(1200, msg.width));  // 限制寬度範圍
