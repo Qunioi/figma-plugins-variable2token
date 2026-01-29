@@ -125,11 +125,20 @@ function hslaToRgba({ h, s, l, a }: { h: number, s: number, l: number, a: number
 // --- Custom Color Picker Internal State ---
 const pickerVisible = ref(false);
 const pickerPos = ref({ top: 0, left: 0 });
-const pickerTarget = ref<{id: string, name: string, type: string, initialName: string, initialValue: string} | null>(null);
+const pickerTarget = ref<{
+  id: string, 
+  name: string, 
+  type: string, 
+  initialName: string, 
+  initialValue: string,
+  initialDescription: string
+} | null>(null);
 const pickerHsv = ref({ h: 0, s: 0, v: 0, a: 1 });
 const pickerColorMode = ref<'RGBA' | 'HSLA' | 'HEX8'>('RGBA');
 const pickerInputName = ref('');
+const pickerDescription = ref('');
 const pickerShowAliasList = ref(false);
+const pickerShowAdvanced = ref(false);
 const pickerAliasQuery = ref('');
 
 const allVariables = computed(() => {
@@ -154,9 +163,12 @@ const openPicker = (e: MouseEvent, v: any) => {
     name: v.name.split('/').pop() || '', 
     type: v.type,
     initialName: v.name.split('/').pop() || '',
-    initialValue: currentVal
+    initialValue: currentVal,
+    initialDescription: v.description || ""
   };
   pickerInputName.value = pickerTarget.value.name;
+  pickerDescription.value = pickerTarget.value.initialDescription;
+  pickerShowAdvanced.value = false;
   
   const rgba = hexToRgba(currentVal);
   pickerHsv.value = rgbaToHsva(rgba);
@@ -253,21 +265,41 @@ const closePicker = () => {
     
     const nameChanged = pickerInputName.value !== pickerTarget.value.initialName;
     const colorChanged = currentHex8 !== initialHex8;
+    const descChanged = pickerDescription.value !== pickerTarget.value.initialDescription;
     
-    if (nameChanged || colorChanged) {
+    if (nameChanged || colorChanged || descChanged) {
        // 只有在真正有修改時才顯示通知並紀錄歷史
        lastChange.value = { 
          variableId: pickerTarget.value.id, 
          modeId: activeMode.value!, 
          oldValue: colorChanged ? pickerTarget.value.initialValue : undefined,
+         oldDescription: descChanged ? pickerTarget.value.initialDescription : undefined,
          varType: pickerTarget.value.type, 
          label: pickerTarget.value.name 
        };
+
+       // 如果描述有變動，離開時才同步
+       if (descChanged) {
+         handleUpdateDescription();
+       }
+
        toastMessage.value = `Updated ${pickerTarget.value.name}`;
        showToast.value = true;
     }
   }
   pickerVisible.value = false;
+};
+
+const handleUpdateDescription = () => {
+  if (pickerTarget.value) {
+    parent.postMessage({ 
+      pluginMessage: { 
+        type: 'update-description', 
+        variableId: pickerTarget.value.id, 
+        description: pickerDescription.value 
+      } 
+    }, '*');
+  }
 };
 
 // Handle dragging logic for SV Canvas
@@ -374,9 +406,18 @@ const showToast = ref(false);
 const viewMode = ref<'list' | 'json'>('list');
 const hoveredIndex = ref<number | null>(null);
 const hoveredRect = ref<{ top: number; height: number } | null>(null);
+const hoveredVariable = ref<any | null>(null);
+const varHoveredRect = ref<{ top: number; left: number; height: number } | null>(null);
 
 // 歷史紀錄練習
-const lastChange = ref<{ variableId: string; modeId: string; oldValue: any; varType: string; label: string } | null>(null);
+const lastChange = ref<{ 
+  variableId: string; 
+  modeId: string; 
+  oldValue?: any; 
+  oldDescription?: string;
+  varType: string; 
+  label: string 
+} | null>(null);
 
 // --- Computed ---
 const activeCollection = computed(() => collections.value[activeIndex.value] || null);
@@ -549,10 +590,23 @@ const updateVariable = (vId: string, newValue: any, vType: string, oldValue?: an
 
 const undoLastChange = () => {
   if (!lastChange.value) return;
-  const { variableId, oldValue, varType } = lastChange.value;
-  updateVariable(variableId, oldValue, varType);
+  const { variableId, oldValue, oldDescription, varType } = lastChange.value;
   
-  toastMessage.value = "Restored previous color";
+  if (oldValue !== undefined) {
+    updateVariable(variableId, oldValue, varType);
+  }
+  
+  if (oldDescription !== undefined) {
+    parent.postMessage({ 
+      pluginMessage: { 
+        type: 'update-description', 
+        variableId: variableId, 
+        description: oldDescription 
+      } 
+    }, '*');
+  }
+  
+  toastMessage.value = "Restored previous state";
   lastChange.value = null;
   setTimeout(() => { showToast.value = false; }, 2000);
 };
@@ -612,6 +666,19 @@ const handleSidebarHover = (i: number | null, e?: MouseEvent) => {
     const target = (e.currentTarget as HTMLElement);
     const rect = target.getBoundingClientRect();
     hoveredRect.value = { top: rect.top, height: rect.height };
+  }
+};
+
+const handleVariableHover = (v: any | null, e?: MouseEvent) => {
+  if (!v || !v.description) {
+    hoveredVariable.value = null;
+    return;
+  }
+  hoveredVariable.value = v;
+  if (e) {
+    const target = (e.currentTarget as HTMLElement);
+    const rect = target.getBoundingClientRect();
+    varHoveredRect.value = { top: rect.top, left: rect.left, height: rect.height };
   }
 };
 
@@ -787,6 +854,8 @@ watch(activeCollection, (newCol) => {
                     v-for="v in vars" 
                     :key="v.name"
                     class="flex items-center gap-3 px-4 py-2.5 group hover:bg-[#3E3E42] transition-colors"
+                    @mouseenter="handleVariableHover(v, $event)"
+                    @mouseleave="handleVariableHover(null)"
                   >
                     <!-- Icon / Color Swatch -->
                     <div v-if="v.type === 'COLOR'" class="relative">
@@ -1059,9 +1128,43 @@ watch(activeCollection, (newCol) => {
               {{ pickerColorMode }}
             </button>
           </div>
+
+          <!-- Advanced Settings Toggle -->
+          <div class="pt-2 border-t border-white/5">
+            <button 
+              @click="pickerShowAdvanced = !pickerShowAdvanced"
+              class="flex items-center gap-1.5 text-[11px] text-white/30 hover:text-white/60 transition-colors py-1"
+            >
+              <ChevronRight :size="12" class="transition-transform" :class="{ 'rotate-90': pickerShowAdvanced }" />
+              進階設定
+            </button>
+            
+            <div v-if="pickerShowAdvanced" class="mt-2 space-y-1.5 animate-in fade-in slide-in-from-top-1 duration-200">
+              <label class="text-[11px] font-medium text-white/50">描述</label>
+              <textarea 
+                v-model="pickerDescription"
+                rows="3"
+                placeholder="關於此變數的描述..."
+                class="w-full bg-white/5 border border-white/10 rounded px-2.5 py-1.5 text-[11px] outline-none focus:border-figma-accent resize-none custom-scrollbar"
+              ></textarea>
+            </div>
+          </div>
         </div>
       </div>
     </template>
+
+    <!-- Variable Description Tooltip -->
+    <div 
+      v-if="hoveredVariable && varHoveredRect" 
+      class="fixed px-2.5 py-1.5 bg-[#2C2C2C] border border-[#3C3C3C] text-white rounded-md z-[3000] whitespace-nowrap shadow-[0_4px_12px_rgba(0,0,0,0.5)] pointer-events-none text-[11px]"
+      :style="{ 
+        top: varHoveredRect.top + varHoveredRect.height / 2 + 'px', 
+        left: varHoveredRect.left + 80 + 'px',
+        transform: 'translateY(-50%)' 
+      }"
+    >
+      {{ hoveredVariable.description }}
+    </div>
   </div>
 </template>
 

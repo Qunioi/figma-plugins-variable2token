@@ -150,6 +150,7 @@ async function refreshVariables() {
                   resolvedVars.push({
                      id: v.id, // 傳送 ID 供修改使用
                      name: v.name,
+                     description: v.description || "",
                      values: valuesByMode, // 傳送多個模式的值
                      type: v.resolvedType
                   });
@@ -245,6 +246,23 @@ figma.ui.onmessage = async (msg) => {
       }
     } catch (e) {
       console.error("Failed to set alias:", e);
+    }
+  }
+
+  // 修改變數描述
+  if (msg.type === 'update-description') {
+    const { variableId, description } = msg;
+    try {
+      const v = await figma.variables.getVariableByIdAsync(variableId);
+      if (v) {
+        v.description = description;
+        // Optionally refresh if needed, but description change usually doesn't affect the list view unless shown.
+        // We'll refresh to be safe and keep UI in sync.
+        await refreshVariables();
+        figma.notify("Description updated");
+      }
+    } catch (e) {
+      console.error("Failed to update description:", e);
     }
   }
 
