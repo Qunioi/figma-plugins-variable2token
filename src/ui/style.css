@@ -1,0 +1,34 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --figma-color-bg: #2C2C2C;
+  --figma-color-text: #CCCCCC;
+  --figma-color-border: #3C3C3C;
+  --figma-color-bg-brand: #0078D4;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  background-color: var(--figma-color-bg);
+  color: var(--figma-color-text);
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+/* Figma Theme Variables */
+html.figma-light {
+  --figma-color-bg: #FFFFFF;
+  --figma-color-text: #333333;
+  --figma-color-border: #E6E6E6;
+  --figma-color-bg-brand: #18A0FB;
+}
+
+html.figma-dark {
+  --figma-color-bg: #2C2C2C;
+  --figma-color-text: #CCCCCC;
+  --figma-color-border: #3C3C3C;
+  --figma-color-bg-brand: #0078D4;
+}
