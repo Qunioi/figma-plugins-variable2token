@@ -14,9 +14,11 @@ import {
   ChevronsUpDown,
   ChevronsDownUp,
   Settings,
-  Braces,
+  Code,
   List,
-  Download
+  Download,
+  FoldVertical,
+  UnfoldVertical
 } from 'lucide-vue-next';
 
 // --- Color Conversion Utilities ---
@@ -175,8 +177,8 @@ const openPicker = (e: MouseEvent, v: any) => {
   
   // Position calculation
   const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-  const pickerHeight = 440; // 包裝盒預估高度
-  const pickerWidth = 280;
+  const pickerWidth = 320;
+  const pickerHeight = 600;
   
   let top = rect.bottom + 8;
   let left = rect.left;
@@ -408,6 +410,7 @@ const hoveredIndex = ref<number | null>(null);
 const hoveredRect = ref<{ top: number; height: number } | null>(null);
 const hoveredVariable = ref<any | null>(null);
 const varHoveredRect = ref<{ top: number; left: number; height: number } | null>(null);
+const hoverTimer = ref<any>(null);
 
 // 歷史紀錄練習
 const lastChange = ref<{ 
@@ -670,16 +673,26 @@ const handleSidebarHover = (i: number | null, e?: MouseEvent) => {
 };
 
 const handleVariableHover = (v: any | null, e?: MouseEvent) => {
+  if (hoverTimer.value) {
+    clearTimeout(hoverTimer.value);
+    hoverTimer.value = null;
+  }
+
   if (!v || !v.description) {
     hoveredVariable.value = null;
     return;
   }
-  hoveredVariable.value = v;
+
   if (e) {
     const target = (e.currentTarget as HTMLElement);
     const rect = target.getBoundingClientRect();
     varHoveredRect.value = { top: rect.top, left: rect.left, height: rect.height };
   }
+
+  // 延遲 1 秒顯示
+  hoverTimer.value = setTimeout(() => {
+    hoveredVariable.value = v;
+  }, 1000);
 };
 
 // --- Lifecycle ---
@@ -720,7 +733,7 @@ watch(activeCollection, (newCol) => {
         :style="{ width: isSidebarCollapsed ? '48px' : sidebarWidth + 'px' }"
       >
         <div class="flex items-center justify-between h-11 px-3 border-b border-figma-border">
-          <span v-if="!isSidebarCollapsed" class="text-[11px] font-semibold text-figma-text/60 tracking-wider">Collections</span>
+          <span v-if="!isSidebarCollapsed" class="text-[11px] text-figma-text/60">Collections</span>
           <button @click="isSidebarCollapsed = !isSidebarCollapsed" class="p-1 hover:bg-white/10 rounded transition-colors">
             <PanelLeftClose v-if="!isSidebarCollapsed" :size="14" />
             <PanelLeftOpen v-else :size="14" />
@@ -778,7 +791,7 @@ watch(activeCollection, (newCol) => {
                 v-model="searchQuery"
                 type="text" 
                 placeholder="Search variables..."
-                class="w-full bg-white/5 border border-figma-border rounded-md pl-8 pr-3 py-1 text-[12px] focus:outline-none focus:border-figma-accent transition-all"
+                class="w-full bg-white/5 border border-figma-border rounded-md pl-8 pr-3 py-1 text-[12px] text-white/70 focus:text-white focus:outline-none focus:border-figma-accent transition-all placeholder:text-white/20"
               />
             </div>
           </div>
@@ -803,15 +816,15 @@ watch(activeCollection, (newCol) => {
               :title="anyGroupsExpanded ? 'Collapse All' : 'Expand All'" 
               class="p-1.5 hover:bg-white/10 rounded transition-colors" 
             >
-              <ChevronsDownUp v-if="anyGroupsExpanded" :size="16" />
-              <ChevronsUpDown v-else :size="16" />
+              <FoldVertical v-if="anyGroupsExpanded" :size="15" />
+              <UnfoldVertical v-else :size="15" />
             </button>
             <button 
               @click="viewMode = viewMode === 'list' ? 'json' : 'list'" 
               :title="viewMode === 'list' ? 'Switch to JSON view' : 'Switch to List view'"
               class="p-1.5 hover:bg-white/10 rounded transition-colors mr-1"
             >
-              <Braces v-if="viewMode === 'list'" :size="15" />
+              <Code v-if="viewMode === 'list'" :size="15" />
               <List v-else :size="15" />
             </button>
             <button @click="refresh" title="Refresh" class="p-1.5 hover:bg-white/10 rounded transition-colors">
@@ -821,7 +834,7 @@ watch(activeCollection, (newCol) => {
         </header>
 
         <!-- Variable List -->
-        <div class="flex-1 overflow-y-auto p-2 space-y-4 pt-4 custom-scrollbar">
+        <div class="flex-1 overflow-y-auto custom-scrollbar bg-figma-bg">
           <div v-if="!activeCollection" class="flex flex-col items-center justify-center h-full opacity-30 gap-3">
             <Package :size="48" stroke-width="1" />
             <p class="text-sm">Select a collection to view variables</p>
@@ -837,23 +850,23 @@ watch(activeCollection, (newCol) => {
 
           <template v-else>
             <!-- List View -->
-            <div v-if="viewMode === 'list'" class="space-y-4">
-              <div v-for="(vars, groupName) in groupedVariables" :key="groupName" class="rounded-lg overflow-hidden">
+            <div v-if="viewMode === 'list'" class="space-y-0">
+              <div v-for="(vars, groupName) in groupedVariables" :key="groupName" class="border-b border-white/5">
                 <div 
                   @click="toggleGroup(groupName)"
-                  class="flex items-center gap-2 px-3 py-1.5 bg-white/5 cursor-pointer hover:bg-white/10 transition-colors"
+                  class="flex items-center gap-2 px-2 h-8 hover:bg-white/[0.03] cursor-pointer transition-colors group"
                 >
-                  <ChevronDown v-if="!collapsedGroups.has(groupName)" :size="14" class="opacity-40" />
-                  <ChevronRight v-else :size="14" class="opacity-40" />
-                  <span class="text-[11px] font-semibold text-figma-text/70 uppercase tracking-tight flex-1">{{ groupName }}</span>
-                  <span class="text-[10px] bg-white/10 px-1.5 py-0.5 rounded opacity-50">{{ vars.length }}</span>
+                  <ChevronDown v-if="!collapsedGroups.has(groupName)" :size="12" class="opacity-40" />
+                  <ChevronRight v-else :size="12" class="opacity-40" />
+                  <span class="text-[11px] font-medium text-figma-text/80 tracking-tight flex-1">{{ groupName }}</span>
+                  <span class="text-[9px] opacity-20 font-mono">{{ vars.length }}</span>
                 </div>
 
-                <div v-show="!collapsedGroups.has(groupName)" class="bg-black/10">
+                <div v-show="!collapsedGroups.has(groupName)">
                   <div 
                     v-for="v in vars" 
                     :key="v.name"
-                    class="flex items-center gap-3 px-4 py-2.5 group hover:bg-[#3E3E42] transition-colors"
+                    class="flex items-center gap-3 px-6 h-8 group hover:bg-white/[0.04] transition-colors"
                     @mouseenter="handleVariableHover(v, $event)"
                     @mouseleave="handleVariableHover(null)"
                   >
@@ -974,7 +987,7 @@ watch(activeCollection, (newCol) => {
         </div>
 
         <!-- Content -->
-        <div class="p-4 space-y-4 relative">
+        <div class="p-4 space-y-4 relative overflow-y-auto custom-scrollbar flex-1" style="max-height: calc(100vh - 100px)">
           <!-- Name Field -->
           <div class="space-y-1.5">
             <div class="flex items-center justify-between">
@@ -1154,23 +1167,28 @@ watch(activeCollection, (newCol) => {
     </template>
 
     <!-- Variable Description Tooltip -->
-    <div 
-      v-if="hoveredVariable && varHoveredRect" 
-      class="fixed px-2.5 py-1.5 bg-[#2C2C2C] border border-[#3C3C3C] text-white rounded-md z-[3000] whitespace-nowrap shadow-[0_4px_12px_rgba(0,0,0,0.5)] pointer-events-none text-[11px]"
-      :style="{ 
-        top: varHoveredRect.top + varHoveredRect.height / 2 + 'px', 
-        left: varHoveredRect.left + 80 + 'px',
-        transform: 'translateY(-50%)' 
-      }"
-    >
-      {{ hoveredVariable.description }}
-    </div>
+    <transition name="tooltip">
+      <div 
+        v-if="hoveredVariable && varHoveredRect" 
+        class="fixed px-2.5 py-1.5 bg-[#2C2C2C] border border-[#3C3C3C] text-white rounded-md z-[3000] whitespace-nowrap shadow-[0_4px_12px_rgba(0,0,0,0.5)] pointer-events-none text-[11px]"
+        :style="{ 
+          top: varHoveredRect.top + varHoveredRect.height / 2 + 'px', 
+          left: varHoveredRect.left + 80 + 'px',
+          transform: 'translateY(-50%)' 
+        }"
+      >
+        {{ hoveredVariable.description }}
+      </div>
+    </transition>
   </div>
 </template>
 
 <style>
 .toast-enter-active, .toast-leave-active { transition: all 0.2s ease; }
 .toast-enter-from, .toast-leave-to { opacity: 0; transform: translate(-50%, 10px); }
+
+.tooltip-enter-active, .tooltip-leave-active { transition: opacity 0.15s ease, transform 0.15s ease; }
+.tooltip-enter-from, .tooltip-leave-to { opacity: 0; transform: translateY(-50%) translateX(-5px); }
 
 .custom-scrollbar::-webkit-scrollbar { width: 8px; }
 .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }

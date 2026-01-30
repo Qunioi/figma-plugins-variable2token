@@ -1,7 +1,7 @@
 /// <reference types="@figma/plugin-typings" />
 
 // 顯示 UI
-figma.showUI(__html__, { width: 800, height: 500, themeColors: true });
+figma.showUI(__html__, { width: 800, height: 640, themeColors: true });
 
 // 解析變數值 (處理 Alias)，防止無窮迴圈
 async function resolveValue(value: any, modeId: string, visited: Set<string> = new Set()): Promise<string> {
