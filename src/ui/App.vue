@@ -18,8 +18,16 @@ import {
   List,
   Download,
   FoldVertical,
-  UnfoldVertical
+  UnfoldVertical,
+  Pipette,
+  X,
+  LayoutGrid,
+  LayoutList,
+  Plus
 } from 'lucide-vue-next';
+
+// --- Demo Data Imports ---
+const demoFiles = import.meta.glob('../demo/**/*.tokens.json', { eager: true });
 
 // --- Color Conversion Utilities ---
 function hexToRgba(hex: string) {
@@ -136,12 +144,18 @@ const pickerTarget = ref<{
   initialDescription: string
 } | null>(null);
 const pickerHsv = ref({ h: 0, s: 0, v: 0, a: 1 });
-const pickerColorMode = ref<'RGBA' | 'HSLA' | 'HEX8'>('RGBA');
+const pickerColorMode = ref<'RGB' | 'Hex' | 'CSS'>('RGB');
+const pickerTab = ref<'Custom' | 'Libraries'>('Custom');
 const pickerInputName = ref('');
 const pickerDescription = ref('');
 const pickerShowAliasList = ref(false);
 const pickerShowAdvanced = ref(false);
 const pickerAliasQuery = ref('');
+const isLibraryGrid = ref(false);
+const isVariableInfoExpanded = ref(false);
+const librarySearchQuery = ref('');
+const libraryFilter = ref('All libraries');
+const isColorModeDropdownOpen = ref(false);
 
 const allVariables = computed(() => {
   const vars: any[] = [];
@@ -178,7 +192,7 @@ const openPicker = (e: MouseEvent, v: any) => {
   // Position calculation
   const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
   const pickerWidth = 320;
-  const pickerHeight = 600;
+  const pickerHeight = 420; // 精確的 UI 高度
   
   let top = rect.bottom + 8;
   let left = rect.left;
@@ -196,6 +210,7 @@ const openPicker = (e: MouseEvent, v: any) => {
   
   pickerPos.value = { top, left };
   pickerVisible.value = true;
+  isColorModeDropdownOpen.value = false;
 };
 
 const updateFromPicker = () => {
@@ -222,20 +237,68 @@ const resetPickerColor = () => {
 };
 
 const handleRename = (silent = false) => {
-  if (pickerTarget.value && pickerInputName.value !== pickerTarget.value.name) {
+  if (!pickerTarget.value || !pickerInputName.value) return;
+  
+  // 如果有名稱重複，不進行後續的存檔動作
+  if (isDuplicateName.value) return;
+  
+  // 使用 initialName 作為 Undo 的參考點（開啟 Picker 時的原始名稱）
+  const initialName = pickerTarget.value.initialName;
+  const newName = pickerInputName.value;
+  const newDescription = pickerDescription.value;
+  const isNameChanged = newName !== initialName;
+  const isDescChanged = newDescription !== pickerTarget.value.initialDescription;
+  
+  // Update name if changed from initial
+  if (isNameChanged) {
     parent.postMessage({ 
       pluginMessage: { 
-        type: 'rename-variable', 
+        type: 'update-name', 
         variableId: pickerTarget.value.id, 
-        newName: pickerInputName.value 
+        newName 
       } 
     }, '*');
-    pickerTarget.value.name = pickerInputName.value;
     
-    if (!silent) {
-      toastMessage.value = `Renamed ${pickerInputName.value}`;
-      showToast.value = true;
+    // 更新本地資料
+    const coll = collections.value.find((c: any) => c.variables.some((v: any) => v.id === pickerTarget.value?.id));
+    if (coll) {
+      const variable = coll.variables.find((v: any) => v.id === pickerTarget.value?.id);
+      if (variable) variable.name = newName;
     }
+    pickerTarget.value.name = newName;
+  }
+
+  // Update description if changed
+  if (isDescChanged) {
+    parent.postMessage({
+      pluginMessage: {
+        type: 'update-description',
+        variableId: pickerTarget.value.id,
+        description: newDescription
+      }
+    }, '*');
+    
+    const coll = collections.value.find((c: any) => c.variables.some((v: any) => v.id === pickerTarget.value?.id));
+    if (coll) {
+      const variable = coll.variables.find((v: any) => v.id === pickerTarget.value?.id);
+      if (variable) variable.description = newDescription;
+    }
+  }
+  
+  if (!silent && (isNameChanged || isDescChanged)) {
+    lastChange.value = {
+      variableId: pickerTarget.value.id,
+      modeId: activeMode.value || '',
+      oldName: isNameChanged ? initialName : undefined,
+      oldDescription: isDescChanged ? pickerTarget.value.initialDescription : undefined,
+      varType: pickerTarget.value.type,
+      label: newName
+    };
+    showToastWithTimer(`Updated variable info`);
+    
+    // 更新 initialName/Description 為新值，這樣下次修改才能追蹤差異
+    if (isNameChanged) pickerTarget.value.initialName = newName;
+    if (isDescChanged) pickerTarget.value.initialDescription = newDescription;
   }
 };
 
@@ -254,13 +317,46 @@ const setVariableAlias = (targetId: string) => {
   }
 };
 
-const cycleColorMode = () => {
-  const modes: ('RGBA' | 'HSLA' | 'HEX8')[] = ['RGBA', 'HSLA', 'HEX8'];
-  const idx = modes.indexOf(pickerColorMode.value);
-  pickerColorMode.value = modes[(idx + 1) % modes.length];
+// 檢查是否有重複的變數名稱
+const isDuplicateName = computed(() => {
+  if (!pickerTarget.value || !pickerInputName.value) return false;
+  const currentName = pickerInputName.value.trim();
+  if (!currentName) return false;
+  
+  // 如果名稱跟原始名稱相同，不算重複
+  if (currentName === pickerTarget.value.initialName) return false;
+  
+  // 檢查所有集合中的變數
+  for (const col of collections.value) {
+    for (const v of col.variables) {
+      // 排除當前正在編輯的變數
+      if (v.id === pickerTarget.value.id) continue;
+      // 比對名稱 (可能是完整路徑或是結尾名稱)
+      const varShortName = v.name.split('/').pop() || v.name;
+      if (varShortName === currentName || v.name === currentName) {
+        return true;
+      }
+    }
+  }
+  return false;
+});
+
+const cycleColorMode = (e?: MouseEvent) => {
+  if (e) e.stopPropagation();
+  isColorModeDropdownOpen.value = !isColorModeDropdownOpen.value;
 };
 
 const closePicker = () => {
+  // 如果有重複名稱，禁止關閉
+  if (isDuplicateName.value) {
+    showToastWithTimer('變數名稱已存在，請修改後再關閉', 3000);
+    // 自動將焦點移回名稱輸入框
+    setTimeout(() => {
+      document.getElementById('picker-name-input')?.focus();
+    }, 0);
+    return;
+  }
+  
   if (pickerTarget.value) {
     const currentHex8 = rgbaToHex8(hsvaToRgba(pickerHsv.value)).toUpperCase();
     const initialHex8 = rgbaToHex8(hexToRgba(pickerTarget.value.initialValue)).toUpperCase();
@@ -275,18 +371,23 @@ const closePicker = () => {
          variableId: pickerTarget.value.id, 
          modeId: activeMode.value!, 
          oldValue: colorChanged ? pickerTarget.value.initialValue : undefined,
+         oldName: nameChanged ? pickerTarget.value.initialName : undefined,
          oldDescription: descChanged ? pickerTarget.value.initialDescription : undefined,
          varType: pickerTarget.value.type, 
          label: pickerTarget.value.name 
        };
+
+       // 如果名稱有變動，同步更新
+       if (nameChanged) {
+         handleRename(true);
+       }
 
        // 如果描述有變動，離開時才同步
        if (descChanged) {
          handleUpdateDescription();
        }
 
-       toastMessage.value = `Updated ${pickerTarget.value.name}`;
-       showToast.value = true;
+       showToastWithTimer(`Updated ${pickerTarget.value.name}`);
     }
   }
   pickerVisible.value = false;
@@ -372,16 +473,15 @@ const handleRgbaInput = (key: string, val: any) => {
   updateFromPicker();
 };
 
-const handleHslaInput = (key: string, val: any) => {
-  const hsla = { ...pickerHsla.value, [key]: parseFloat(val) || 0 };
-  const rgba = hslaToRgba(hsla);
-  pickerHsv.value = rgbaToHsva(rgba);
+const handleAlphaInputRelative = (val: any) => {
+  const alpha = parseFloat(val) / 100;
+  pickerHsv.value.a = Math.max(0, Math.min(1, isNaN(alpha) ? 1 : alpha));
   updateFromPicker();
 };
 
 const pickerHex = computed({
   get: () => {
-    if (pickerColorMode.value === 'HEX8') {
+    if (pickerColorMode.value === 'Hex') {
       return rgbaToHex8(pickerRgba.value);
     }
     return rgbaToHex(pickerRgba.value);
@@ -405,18 +505,33 @@ const sidebarWidth = ref(180);
 const collapsedGroups = ref<Set<string>>(new Set());
 const toastMessage = ref('');
 const showToast = ref(false);
+let toastTimer: ReturnType<typeof setTimeout> | null = null;
+
+// 統一管理 Toast 顯示與計時
+const showToastWithTimer = (message: string, duration = 3000) => {
+  if (toastTimer) clearTimeout(toastTimer);
+  toastMessage.value = message;
+  showToast.value = true;
+  toastTimer = setTimeout(() => {
+    showToast.value = false;
+    toastTimer = null;
+  }, duration);
+};
+
 const viewMode = ref<'list' | 'json'>('list');
 const hoveredIndex = ref<number | null>(null);
 const hoveredRect = ref<{ top: number; height: number } | null>(null);
 const hoveredVariable = ref<any | null>(null);
 const varHoveredRect = ref<{ top: number; left: number; height: number } | null>(null);
 const hoverTimer = ref<any>(null);
+const collapsedSidebarFolders = ref<Set<string>>(new Set());
 
 // 歷史紀錄練習
 const lastChange = ref<{ 
   variableId: string; 
   modeId: string; 
   oldValue?: any; 
+  oldName?: string;
   oldDescription?: string;
   varType: string; 
   label: string 
@@ -424,6 +539,41 @@ const lastChange = ref<{
 
 // --- Computed ---
 const activeCollection = computed(() => collections.value[activeIndex.value] || null);
+
+const structuredCollections = computed(() => {
+  const result: any[] = [];
+  const groups: Record<string, any> = {};
+
+  collections.value.forEach((col, index) => {
+    const parts = col.collectionName.split('/');
+    if (parts.length > 1) {
+      const folderName = parts[0];
+      const displayName = parts.slice(1).join('/');
+      if (!groups[folderName]) {
+        groups[folderName] = { 
+          type: 'folder', 
+          name: folderName, 
+          children: [] 
+        };
+        result.push(groups[folderName]);
+      }
+      groups[folderName].children.push({ 
+        ...col, 
+        displayName, 
+        originalIndex: index 
+      });
+    } else {
+      result.push({ 
+        type: 'item', 
+        ...col, 
+        displayName: col.collectionName, 
+        originalIndex: index 
+      });
+    }
+  });
+
+  return result;
+});
 
 const filteredVariables = computed(() => {
   if (!activeCollection.value) return [];
@@ -490,14 +640,49 @@ const documentColors = computed(() => {
   return Array.from(colors).slice(0, 12); // 取前 12 個作為預設色板
 });
 
-// --- Methods ---
-const selectCollection = (index: number) => {
-  activeIndex.value = index;
-  if (activeCollection.value?.modes?.length > 0) {
-    activeMode.value = activeCollection.value.modes[0].modeId;
-  } else {
-    activeMode.value = null;
+const filteredLibraries = computed(() => {
+  let result: any[] = [];
+  
+  // Flatten all variables
+  collections.value.forEach(col => {
+    if (libraryFilter.value === 'All libraries' || col.collectionName === libraryFilter.value) {
+      col.variables.forEach((v: any) => {
+        if (v.type === 'COLOR') {
+          result.push({
+            ...v,
+            collectionName: col.collectionName,
+            colorValue: v.values.find((m: any) => m.modeId === activeMode.value)?.value || v.values[0]?.value
+          });
+        }
+      });
+    }
+  });
+
+  if (librarySearchQuery.value) {
+    const q = librarySearchQuery.value.toLowerCase();
+    result = result.filter(v => 
+      v.name.toLowerCase().includes(q) || 
+      (v.description && v.description.toLowerCase().includes(q))
+    );
   }
+
+  return result;
+});
+
+// Group filtered libraries by collection for grid/list view headers if needed
+const groupedLibraries = computed(() => {
+  const groups: Record<string, any[]> = {};
+  filteredLibraries.value.forEach(v => {
+    const colName = v.collectionName;
+    if (!groups[colName]) groups[colName] = [];
+    groups[colName].push(v);
+  });
+  return groups;
+});
+
+const selectMode = (collectionIndex: number, modeId: string) => {
+  activeIndex.value = collectionIndex;
+  activeMode.value = modeId;
 };
 
 const refresh = () => {
@@ -576,8 +761,7 @@ const updateVariable = (vId: string, newValue: any, vType: string, oldValue?: an
   // 紀錄歷史以便復原 (非靜默模式下才跳通知)
   if (!silent && oldValue !== undefined && label) {
     lastChange.value = { variableId: vId, modeId: activeMode.value, oldValue, varType: vType, label };
-    toastMessage.value = `Updated ${label}`;
-    showToast.value = true;
+    showToastWithTimer(`Updated ${label}`);
   }
 
   parent.postMessage({ 
@@ -593,10 +777,33 @@ const updateVariable = (vId: string, newValue: any, vType: string, oldValue?: an
 
 const undoLastChange = () => {
   if (!lastChange.value) return;
-  const { variableId, oldValue, oldDescription, varType } = lastChange.value;
+  const { variableId, oldValue, oldDescription, oldName, varType } = lastChange.value;
   
   if (oldValue !== undefined) {
     updateVariable(variableId, oldValue, varType);
+  }
+
+  if (oldName !== undefined) {
+    parent.postMessage({ 
+      pluginMessage: { 
+        type: 'update-name', 
+        variableId: variableId, 
+        newName: oldName 
+      } 
+    }, '*');
+    
+    // 更新本地資料
+    const coll = collections.value.find(c => c.variables.some((v: any) => v.id === variableId));
+    if (coll) {
+      const variable = coll.variables.find((v: any) => v.id === variableId);
+      if (variable) variable.name = oldName;
+    }
+    
+    // 如果 Picker 正開啟該變數，同步更新 Picker 內的顯示
+    if (pickerTarget.value && pickerTarget.value.id === variableId) {
+      pickerTarget.value.name = oldName;
+      pickerInputName.value = oldName;
+    }
   }
   
   if (oldDescription !== undefined) {
@@ -607,11 +814,17 @@ const undoLastChange = () => {
         description: oldDescription 
       } 
     }, '*');
+
+    // 更新本地資料
+    const coll = collections.value.find(c => c.variables.some(v => v.id === variableId));
+    if (coll) {
+      const variable = coll.variables.find(v => v.id === variableId);
+      if (variable) variable.description = oldDescription;
+    }
   }
   
-  toastMessage.value = "Restored previous state";
+  showToastWithTimer("Restored previous state");
   lastChange.value = null;
-  setTimeout(() => { showToast.value = false; }, 2000);
 };
 
 const anyGroupsExpanded = computed(() => {
@@ -695,6 +908,14 @@ const handleVariableHover = (v: any | null, e?: MouseEvent) => {
   }, 1000);
 };
 
+const toggleSidebarFolder = (name: string) => {
+  if (collapsedSidebarFolders.value.has(name)) {
+    collapsedSidebarFolders.value.delete(name);
+  } else {
+    collapsedSidebarFolders.value.add(name);
+  }
+};
+
 // --- Lifecycle ---
 onMounted(() => {
   refresh();
@@ -710,6 +931,71 @@ onMounted(() => {
       }
     }
   };
+  
+  // --- Development Mock Data ---
+  setTimeout(() => {
+    if (collections.value.length === 0) {
+      console.log('Building mock data from demo files...');
+      
+      const collectionsMap: Record<string, { collectionName: string, modes: any[], variableMap: Record<string, any> }> = {};
+
+      const processNode = (node: any, path: string = '', modeId: string, variableMap: Record<string, any>) => {
+        for (const [key, val] of Object.entries(node)) {
+          if (key.startsWith('$')) continue;
+          const currentPath = path ? `${path}/${key}` : key;
+          
+          if (val && typeof val === 'object' && !val.$value) {
+            processNode(val, currentPath, modeId, variableMap);
+          } else if (val && (val as any).$value !== undefined) {
+            if (!variableMap[currentPath]) {
+              variableMap[currentPath] = {
+                id: (val as any).$extensions?.['com.figma.variableId'] || currentPath,
+                name: currentPath,
+                type: (val as any).$type?.toUpperCase() || 'STRING',
+                values: []
+              };
+            }
+            variableMap[currentPath].values.push({
+              modeId: modeId,
+              value: (val as any).$value
+            });
+          }
+        }
+      };
+
+      // Parse glob results
+      for (const [path, data] of Object.entries(demoFiles)) {
+        // Path format: ../demo/CollectionName/ModeName.tokens.json
+        const parts = path.split('/');
+        const collectionName = parts[parts.length - 2];
+        const modeName = parts[parts.length - 1].replace('.tokens.json', '');
+        const modeId = `m_${collectionName}_${modeName}`;
+
+        if (!collectionsMap[collectionName]) {
+          collectionsMap[collectionName] = {
+            collectionName: collectionName,
+            modes: [],
+            variableMap: {}
+          };
+        }
+
+        collectionsMap[collectionName].modes.push({ modeId, name: modeName });
+        processNode((data as any).default || data, '', modeId, collectionsMap[collectionName].variableMap);
+      }
+
+      collections.value = Object.values(collectionsMap).map(c => ({
+        collectionName: c.collectionName,
+        modes: c.modes,
+        variables: Object.values(c.variableMap)
+      }));
+      
+      // Auto-expand the first mock collection in dev mode
+      if (collections.value.length > 0) {
+        collapsedSidebarFolders.value.delete('flat_0'); 
+        selectMode(0, collections.value[0].modes[0].modeId);
+      }
+    }
+  }, 500);
 
   // Detect Figma Theme (assuming injected into <html>)
   const isDark = document.documentElement.classList.contains('figma-dark');
@@ -729,37 +1015,115 @@ watch(activeCollection, (newCol) => {
     <div class="flex flex-1 overflow-hidden">
       <!-- Sidebar -->
       <aside 
+        v-if="!isSidebarCollapsed"
         class="flex flex-col border-r border-figma-border bg-black/5"
-        :style="{ width: isSidebarCollapsed ? '48px' : sidebarWidth + 'px' }"
+        :style="{ width: sidebarWidth + 'px' }"
       >
         <div class="flex items-center justify-between h-11 px-3 border-b border-figma-border">
-          <span v-if="!isSidebarCollapsed" class="text-[11px] text-figma-text/60">Collections</span>
-          <button @click="isSidebarCollapsed = !isSidebarCollapsed" class="p-1 hover:bg-white/10 rounded transition-colors">
-            <PanelLeftClose v-if="!isSidebarCollapsed" :size="14" />
-            <PanelLeftOpen v-else :size="14" />
+          <span class="text-[11px] text-figma-text/60">Collections</span>
+          <button @click="isSidebarCollapsed = true" class="p-1 hover:bg-white/10 rounded transition-colors">
+            <PanelLeftClose :size="14" />
           </button>
         </div>
 
         <div class="flex-1 overflow-y-auto pt-2">
-          <div 
-            v-for="(col, i) in collections" 
-            :key="i"
-            @click="selectCollection(i)"
-            @mouseenter="handleSidebarHover(i, $event)"
-            @mouseleave="handleSidebarHover(null)"
-            class="flex items-center gap-2 px-3 py-2 cursor-pointer transition-colors group relative"
-            :class="[
-              activeIndex === i ? 'bg-figma-accent/20 text-figma-accent border-l-2 border-figma-accent' : 'hover:bg-white/5 border-l-2 border-transparent'
-            ]"
-          >
-            <Library v-if="col.status === 'not-imported'" :size="14" class="opacity-40" />
-            <Package v-else :size="14" class="opacity-70" />
-            
-            <div v-if="!isSidebarCollapsed" class="flex-1 min-w-0">
-              <div class="text-[12px] truncate font-medium">{{ col.collectionName.split('/').pop() }}</div>
-              <div class="text-[10px] opacity-50">{{ col.variables.length }} vars</div>
+          <template v-for="(group, gIdx) in structuredCollections" :key="gIdx">
+            <!-- Folder Entry -->
+            <template v-if="group.type === 'folder'">
+              <div 
+                @click="toggleSidebarFolder(group.name)"
+                class="flex items-center px-3 h-9 cursor-pointer hover:bg-white/5 transition-colors group"
+              >
+                <div v-if="!isSidebarCollapsed" class="flex-1 flex items-center justify-between min-w-0 pr-1">
+                  <div class="text-[12px] truncate font-medium text-white/90">{{ group.name }}</div>
+                  <div class="text-[10px] opacity-30">{{ group.children.length }} items</div>
+                </div>
+              </div>
+
+              <!-- Children -->
+              <div v-if="!collapsedSidebarFolders.has(group.name) && !isSidebarCollapsed" class="ml-4">
+                <div 
+                  v-for="(child, cIdx) in group.children" 
+                  :key="cIdx"
+                  @click="selectCollection(child.originalIndex)"
+                  @mouseenter="handleSidebarHover(child.originalIndex, $event)"
+                  @mouseleave="handleSidebarHover(null)"
+                  class="flex items-center h-8 cursor-pointer transition-all group relative mr-2 rounded-md"
+                  :class="[
+                    activeIndex === child.originalIndex ? 'bg-white/[0.08] text-white font-bold' : 'text-white/50 hover:bg-white/5'
+                  ]"
+                >
+                  <!-- Tree lines logic -->
+                  <div class="absolute -left-3 h-full flex flex-col items-center">
+                    <!-- Vertical line: only top half if it's the last item -->
+                    <div class="w-[1px] bg-white/20" :class="cIdx === group.children.length - 1 ? 'h-1/2' : 'h-full'"></div>
+                    <!-- Horizontal dot/line -->
+                    <div class="absolute top-1/2 left-0 w-3 h-[1px] bg-white/20"></div>
+                  </div>
+                  
+                  <div class="text-[11px] truncate flex-1 pl-3">{{ child.displayName }}</div>
+                </div>
+
+                <!-- Modes Tree for folder children -->
+                <div v-if="!collapsedSidebarFolders.has('child_' + child.originalIndex) && collections[child.originalIndex]?.modes?.length >= 1" class="ml-4 relative">
+                  <div 
+                    v-for="(mode, mIdx) in collections[child.originalIndex].modes" 
+                    :key="mode.modeId"
+                    @click.stop="selectMode(child.originalIndex, mode.modeId)"
+                    class="flex items-center h-8 cursor-pointer transition-all relative mr-2 ml-4 rounded-md"
+                    :class="[
+                      activeIndex === child.originalIndex && activeMode === mode.modeId ? 'bg-white/[0.08] text-white' : 'text-white/50 hover:bg-white/5'
+                    ]"
+                  >
+                    <!-- Tree lines -->
+                    <div class="absolute -left-3 h-full flex flex-col items-center">
+                      <!-- Vertical line: only top half if it's the last item -->
+                      <div class="w-[1px] bg-[#444]" :class="mIdx === collections[child.originalIndex].modes.length - 1 ? 'h-1/2' : 'h-full'"></div>
+                      <!-- Horizontal dot/line -->
+                      <div class="absolute top-1/2 left-0 w-3 h-[1px] bg-[#444]"></div>
+                    </div>
+                    
+                    <div class="text-[11px] truncate flex-1 pl-3">{{ mode.name }}</div>
+                  </div>
+                </div>
+              </div>
+            </template>
+
+            <!-- Flat Item (Collection Header) -->
+            <div 
+              v-else
+              @click="toggleSidebarFolder('flat_' + group.originalIndex)"
+              class="flex items-center gap-2 px-3 py-2 cursor-pointer transition-all group relative rounded-md hover:bg-white/5"
+            >
+              <div v-if="!isSidebarCollapsed" class="flex-1 flex items-center justify-between min-w-0">
+                <div class="text-[12px] truncate text-white/80">{{ group.displayName }}</div>
+                <div class="text-[10px] text-[#666]">{{ collections[group.originalIndex]?.modes?.length || 0 }} items</div>
+              </div>
             </div>
-          </div>
+
+            <!-- Modes Tree for flat items -->
+            <div v-if="!collapsedSidebarFolders.has('flat_' + group.originalIndex) && collections[group.originalIndex]?.modes?.length >= 1" class="ml-3 relative">
+              <div 
+                v-for="(mode, mIdx) in collections[group.originalIndex].modes" 
+                :key="mode.modeId"
+                @click.stop="selectMode(group.originalIndex, mode.modeId)"
+                class="flex items-center h-7 cursor-pointer transition-all relative mr-2 ml-4 rounded-md"
+                :class="[
+                  activeIndex === group.originalIndex && activeMode === mode.modeId ? 'bg-white/[0.08] text-white' : 'text-white/50 hover:bg-white/5'
+                ]"
+              >
+                <!-- Tree lines -->
+                <div class="absolute -left-3 h-full flex flex-col items-center">
+                  <!-- Vertical line: only top half if it's the last item -->
+                  <div class="w-[1px] bg-[#444]" :class="mIdx === collections[group.originalIndex].modes.length - 1 ? 'h-1/2' : 'h-full'"></div>
+                  <!-- Horizontal dot/line -->
+                  <div class="absolute top-1/2 left-0 w-3 h-[1px] bg-[#444]"></div>
+                </div>
+                
+                <div class="text-[11px] truncate flex-1 pl-2">{{ mode.name }}</div>
+              </div>
+            </div>
+          </template>
         </div>
 
         <!-- Tooltip simulation (Moved outside overflow container) -->
@@ -784,6 +1148,15 @@ watch(activeCollection, (newCol) => {
       <main class="flex-1 flex flex-col min-w-0">
         <!-- Toolbar -->
         <header class="h-11 border-b border-figma-border flex items-center px-3 gap-3 bg-figma-bg z-10">
+          <!-- Sidebar toggle button (show when collapsed) -->
+          <button 
+            v-if="isSidebarCollapsed"
+            @click="isSidebarCollapsed = false" 
+            class="p-1.5 hover:bg-white/10 rounded transition-colors"
+          >
+            <PanelLeftOpen :size="14" />
+          </button>
+          
           <div class="flex-1 flex items-center gap-2 max-w-sm">
             <div class="relative flex-1">
               <Search :size="13" class="absolute left-2.5 top-1/2 -translate-y-1/2 opacity-40" />
@@ -796,16 +1169,6 @@ watch(activeCollection, (newCol) => {
             </div>
           </div>
 
-          <div v-if="activeCollection?.modes?.length > 0" class="flex items-center gap-1.5 ml-1">
-            <select 
-              v-model="activeMode"
-              class="bg-white/5 border border-figma-border rounded-md px-2 py-1 text-[11px] focus:outline-none appearance-none cursor-pointer hover:border-figma-accent min-w-[100px]"
-            >
-              <option v-for="mode in activeCollection.modes" :key="mode.modeId" :value="mode.modeId">
-                {{ mode.name }}
-              </option>
-            </select>
-          </div>
 
           <!-- Spacer to push buttons to the right -->
           <div class="flex-1"></div>
@@ -977,191 +1340,280 @@ watch(activeCollection, (newCol) => {
       ></div>
 
       <div 
-        class="fixed z-[2000] w-[280px] bg-[#2C2C2C] border border-[#444] rounded-lg shadow-[0_8px_24px_rgba(0,0,0,0.5)] flex flex-col overflow-hidden text-white pointer-events-auto"
+        class="fixed z-[2000] w-[260px] bg-[#2C2C2C] border border-[#444] rounded-lg shadow-[0_8px_24px_rgba(0,0,0,0.5)] flex flex-col overflow-hidden text-white pointer-events-auto"
         :style="{ top: pickerPos.top + 'px', left: pickerPos.left + 'px' }"
       >
-        <!-- Title -->
-        <div class="px-4 py-3 border-b border-white/5 flex items-center justify-between">
-          <span class="text-[12px] font-bold truncate pr-4">{{ pickerTarget?.name }}</span>
-          <button @click="closePicker" class="opacity-40 hover:opacity-100 transition-opacity"><ChevronDown :size="14" /></button>
+        <!-- Tabs Header -->
+        <div class="flex items-center justify-between px-2 pt-1 border-b border-white/5 bg-[#2C2C2C]">
+          <div class="flex">
+            <button 
+              @click="pickerTab = 'Custom'"
+              class="px-3 py-2 text-[11px] font-medium transition-colors relative"
+              :class="pickerTab === 'Custom' ? 'text-white' : 'text-white/40 hover:text-white/60'"
+            >
+              Custom
+              <div v-if="pickerTab === 'Custom'" class="absolute bottom-0 left-0 w-full h-[2px] bg-figma-accent"></div>
+            </button>
+            <button 
+              @click="pickerTab = 'Libraries'"
+              class="px-3 py-2 text-[11px] font-medium transition-colors relative"
+              :class="pickerTab === 'Libraries' ? 'text-white' : 'text-white/40 hover:text-white/60'"
+            >
+              Libraries
+              <div v-if="pickerTab === 'Libraries'" class="absolute bottom-0 left-0 w-full h-[2px] bg-figma-accent"></div>
+            </button>
+          </div>
+          <button @click="closePicker" class="p-2 opacity-40 hover:opacity-100 transition-opacity">
+            <X :size="14" />
+          </button>
         </div>
 
         <!-- Content -->
-        <div class="p-4 space-y-4 relative overflow-y-auto custom-scrollbar flex-1" style="max-height: calc(100vh - 100px)">
-          <!-- Name Field -->
-          <div class="space-y-1.5">
-            <div class="flex items-center justify-between">
-              <label class="text-[11px] font-medium text-white/50">名稱</label>
-              <button 
-                v-if="pickerInputName !== pickerTarget?.initialName"
-                @click="resetPickerName"
-                class="text-[10px] text-figma-accent hover:underline flex items-center gap-1"
-              >
-                <RefreshCcw :size="10" /> Reset
-              </button>
-            </div>
+        <div class="p-3 space-y-3 relative flex-1">
+          <!-- Variable Name Input -->
+          <div class="relative">
             <input 
+              id="picker-name-input"
               v-model="pickerInputName" 
               @blur="handleRename(false)"
               @keyup.enter="handleRename(false)"
-              class="w-full bg-white/5 border border-white/10 rounded px-2.5 py-1.5 text-[12px] outline-none focus:border-figma-accent"
+              class="w-full bg-black/20 border rounded px-2 py-1.5 text-[11px] outline-none text-white/80 placeholder:text-white/20 transition-colors"
+              :class="isDuplicateName ? 'border-red-500 focus:border-red-500' : 'border-white/10 focus:border-figma-accent'"
+              placeholder="Name"
             />
-          </div>
-
-          <!-- Color Field -->
-          <div class="space-y-1.5">
-            <div class="flex items-center justify-between">
-              <label class="text-[11px] font-medium text-white/50">Color</label>
-              <button 
-                v-if="pickerTarget && rgbaToHex8(pickerRgba).toUpperCase() !== rgbaToHex8(hexToRgba(pickerTarget.initialValue)).toUpperCase()"
-                @click="resetPickerColor"
-                class="text-[10px] text-figma-accent hover:underline flex items-center gap-1"
-              >
-                <RefreshCcw :size="10" /> Reset
-              </button>
+            <div v-if="isDuplicateName" class="text-[9px] text-red-400 mt-1 flex items-center gap-1">
+              <span>變數名稱已存在</span>
             </div>
-            
-            <div class="relative">
+          </div>
+          <template v-if="pickerTab === 'Custom'">
+            <!-- SV Canvas -->
+            <div 
+              class="relative w-full h-[150px] rounded-md overflow-hidden cursor-crosshair shrink-0"
+              :style="{ backgroundColor: `hsl(${pickerHsv.h}, 100%, 50%)` }"
+              @mousedown="handleSVMouse"
+            >
+              <div class="absolute inset-0 bg-gradient-to-r from-white to-transparent"></div>
+              <div class="absolute inset-0 bg-gradient-to-t from-black to-transparent"></div>
+              
+              <!-- Handle -->
               <div 
-                @click="pickerShowAliasList = !pickerShowAliasList"
-                class="flex items-center gap-2 bg-white/5 border border-white/10 rounded px-2 py-1.5 cursor-pointer hover:border-white/20 transition-colors"
-                :class="{ 'border-figma-accent ring-1 ring-figma-accent': pickerShowAliasList }"
-              >
-                <div class="w-4 h-4 rounded-sm border border-white/10 shrink-0" :style="{ backgroundColor: pickerHex }"></div>
-                <input 
-                  v-model="pickerHex"
-                  @click.stop
-                  class="flex-1 bg-transparent text-[12px] outline-none font-mono min-w-0"
-                />
-                <ChevronDown :size="12" class="opacity-30 shrink-0" />
+                class="absolute w-4 h-4 border-2 border-white rounded-full shadow-[0_2px_4px_rgba(0,0,0,0.3)] -translate-x-1/2 -translate-y-1/2 pointer-events-none"
+                :style="{ left: pickerHsv.s + '%', top: (100 - pickerHsv.v) + '%' }"
+              ></div>
+            </div>
+
+            <!-- Eye dropper & Sliders -->
+            <div class="flex items-center gap-2 py-1">
+              <button class="p-1.5 hover:bg-white/10 rounded transition-colors text-white/70">
+                <Pipette :size="14" />
+              </button>
+              
+              <div class="flex-1 space-y-3">
+                <!-- Hue Slider -->
+                <div 
+                  class="relative h-2.5 rounded-full cursor-pointer rainbow-gradient"
+                  @mousedown="handleHueMouse"
+                >
+                  <div 
+                    class="absolute top-1/2 -translate-y-1/2 w-3.5 h-3.5 bg-white border border-black/20 rounded-full shadow-md -translate-x-1/2"
+                    :style="{ left: (pickerHsv.h / 360 * 100) + '%' }"
+                  ></div>
+                </div>
+
+                <!-- Alpha Slider -->
+                <div 
+                  class="relative h-2.5 rounded-full cursor-pointer checkerboard overflow-hidden"
+                  @mousedown="handleAlphaMouse"
+                >
+                  <div 
+                    class="absolute inset-0"
+                    :style="{ background: `linear-gradient(to right, transparent, rgba(${pickerRgba.r},${pickerRgba.g},${pickerRgba.b},1))` }"
+                  ></div>
+                  <div 
+                    class="absolute top-1/2 -translate-y-1/2 w-3.5 h-3.5 bg-white border border-black/20 rounded-full shadow-md -translate-x-1/2"
+                    :style="{ left: (pickerHsv.a * 100) + '%' }"
+                  ></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Bottom Row: Mode & Inputs -->
+            <div class="flex gap-1 items-center px-0.5 mt-1 relative">
+              <!-- Mode Select -->
+              <div class="w-[52px] shrink-0 h-[24px] relative">
+                <button 
+                  @click.stop="cycleColorMode"
+                  class="w-full h-full px-1 bg-black/20 hover:bg-black/40 rounded text-[10px] font-medium transition-all flex items-center justify-between gap-0.5 border border-white/5"
+                >
+                  <span class="truncate">{{ pickerColorMode }}</span>
+                  <ChevronDown :size="10" class="shrink-0 opacity-40" />
+                </button>
+                
+                <!-- Dropdown Menu -->
+                <div v-if="isColorModeDropdownOpen" class="absolute bottom-full left-0 mb-1 w-[70px] bg-[#333] border border-[#444] rounded shadow-xl z-50 overflow-hidden">
+                  <div 
+                    v-for="mode in (['RGB', 'Hex', 'CSS'] as const)" 
+                    :key="mode"
+                    @click="pickerColorMode = mode; isColorModeDropdownOpen = false"
+                    class="px-2 py-1.5 text-[10px] hover:bg-figma-accent hover:text-white cursor-pointer transition-colors"
+                    :class="{ 'text-figma-accent font-bold': pickerColorMode === mode }"
+                  >
+                    {{ mode }}
+                  </div>
+                </div>
               </div>
 
-              <!-- Alias Variable List -->
-              <div 
-                v-if="pickerShowAliasList" 
-                class="absolute top-full left-0 w-full mt-1 bg-[#2C2C2C] border border-[#444] rounded shadow-xl z-20 max-h-48 flex flex-col overflow-hidden"
-                @click.stop
-              >
-                <div class="p-1 border-b border-white/10">
-                  <input 
-                    v-model="pickerAliasQuery"
-                    placeholder="Search color variables..."
-                    class="w-full bg-black/20 border border-white/10 rounded px-2 py-1 text-[11px] outline-none focus:border-figma-accent"
-                    autoFocus
+              <!-- Main Input Area -->
+              <div class="flex-1 min-w-0 h-[24px]">
+                <!-- RGB Inputs -->
+                <div v-if="pickerColorMode === 'RGB'" class="w-full h-full grid grid-cols-3 gap-1">
+                  <input v-for="key in ['r','g','b']" :key="key"
+                    :value="pickerRgba[key as keyof typeof pickerRgba]"
+                    @input="(e: any) => handleRgbaInput(key, (e.target as HTMLInputElement).value)"
+                    class="w-full h-full bg-black/20 border border-white/5 rounded text-[10px] text-center outline-none focus:bg-black/30 text-white/90"
                   />
                 </div>
-                <div class="overflow-y-auto custom-scrollbar">
-                  <div 
-                    v-for="v in filteredAliasVariables" 
-                    :key="v.id"
-                    @click="setVariableAlias(v.id)"
-                    class="flex items-center gap-2 px-2 py-1.5 hover:bg-white/5 cursor-pointer text-[11px]"
+
+                <!-- Hex Input -->
+                <input 
+                  v-else-if="pickerColorMode === 'Hex'"
+                  v-model="pickerHex"
+                  class="w-full h-full bg-black/20 border border-white/5 rounded px-2 text-[10px] outline-none focus:bg-black/30 font-mono uppercase text-white/90"
+                />
+
+                <!-- CSS Input -->
+                <input 
+                  v-else
+                  :value="`rgb(${pickerRgba.r} ${pickerRgba.g} ${pickerRgba.b}${pickerRgba.a < 1 ? ' / ' + pickerRgba.a.toFixed(2) : ''})`"
+                  readonly
+                  class="w-full h-full bg-black/20 border border-white/5 rounded px-2 text-[9px] outline-none opacity-60 font-mono text-white/80"
+                />
+              </div>
+
+              <!-- Alpha % (Hidden in CSS mode) -->
+              <div v-if="pickerColorMode !== 'CSS'" class="w-[42px] shrink-0 flex items-center gap-0 h-[24px] px-1 bg-black/20 border border-white/5 rounded">
+                <input 
+                  :value="Math.round(pickerRgba.a * 100)"
+                  @input="(e: any) => handleAlphaInputRelative((e.target as HTMLInputElement).value)"
+                  class="w-full bg-transparent text-[10px] text-center outline-none text-white/90 p-0"
+                />
+                <span class="text-[9px] opacity-20 select-none">%</span>
+              </div>
+            </div>
+
+            <!-- Variable Info Toggle Section -->
+            <div class="pt-1 mt-2 border-t border-white/5">
+              <div 
+                @click="isVariableInfoExpanded = !isVariableInfoExpanded"
+                class="flex items-center justify-between h-8 cursor-pointer -mx-1 px-1 rounded transition-colors group"
+              >
+                <div class="flex items-center gap-2">
+                  <div :class="{ 'rotate-90': isVariableInfoExpanded }" class="transition-transform duration-200">
+                    <ChevronRight :size="10" class="opacity-30" />
+                  </div>
+                  <span class="text-[10px] text-white/30 group-hover:text-white/80" :class="{ 'text-white/80': isVariableInfoExpanded }">進階設定</span>
+                </div>
+              </div>
+
+              <!-- Expanded Info Fields -->
+              <div v-if="isVariableInfoExpanded" class="space-y-3 px-1 pb-1 animate-in fade-in slide-in-from-top-1 duration-200">
+                <div>
+                  <textarea 
+                    v-model="pickerDescription" 
+                    @blur="handleRename(false)"
+                    class="w-full bg-black/20 border border-white/10 rounded px-2 py-1.5 text-[11px] outline-none text-white/80 focus:border-figma-accent min-h-[60px] resize-none placeholder:text-white/20 transition-colors"
+                    placeholder="描述"
+                  ></textarea>
+                </div>
+              </div>
+            </div>
+          </template>
+
+          <template v-else>
+            <!-- Libraries Tab Content -->
+            <div class="flex flex-col h-[400px] -m-3 overflow-hidden bg-[#2C2C2C]">
+              <!-- Library Toolbar -->
+              <div class="p-3 border-b border-white/5 space-y-3">
+                <div class="relative">
+                  <Search :size="12" class="absolute left-2.5 top-1/2 -translate-y-1/2 opacity-30" />
+                  <input 
+                    v-model="librarySearchQuery"
+                    class="w-full bg-black/20 border border-white/10 rounded-md pl-8 pr-3 py-1.5 text-[11px] outline-none focus:border-figma-accent placeholder:text-white/20 transition-colors"
+                    placeholder="Search variables..."
+                  />
+                </div>
+                <div class="flex items-center justify-between">
+                  <select 
+                    v-model="libraryFilter"
+                    class="bg-transparent text-[11px] text-white/60 border-none outline-none cursor-pointer hover:text-white transition-colors"
                   >
-                    <div class="w-3 h-3 rounded-sm border border-white/10" :style="{ backgroundColor: v.values[0]?.value }"></div>
-                    <span class="flex-1 truncate opacity-70">{{ v.name }}</span>
-                    <span class="text-[9px] opacity-30 font-mono">{{ v.values[0]?.value }}</span>
+                    <option value="All libraries">All libraries</option>
+                    <option v-for="col in collections" :key="col.collectionName" :value="col.collectionName">
+                      {{ col.collectionName }}
+                    </option>
+                  </select>
+                  <div class="flex items-center gap-1">
+                    <button 
+                      @click="isLibraryGrid = false"
+                      :class="!isLibraryGrid ? 'text-white bg-white/10' : 'text-white/30 hover:text-white/60'"
+                      class="p-1 rounded transition-colors"
+                    >
+                      <LayoutList :size="14" />
+                    </button>
+                    <button 
+                      @click="isLibraryGrid = true"
+                      :class="isLibraryGrid ? 'text-white bg-white/10' : 'text-white/30 hover:text-white/60'"
+                      class="p-1 rounded transition-colors"
+                    >
+                      <LayoutGrid :size="14" />
+                    </button>
+                    <div class="w-[1px] h-3 bg-white/10 mx-1"></div>
+                    <button class="p-1 text-white/30 hover:text-white/60 transition-colors">
+                      <Plus :size="14" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Content Scroll Area -->
+              <div class="flex-1 overflow-y-auto custom-scrollbar p-3">
+                <div v-if="filteredLibraries.length === 0" class="flex flex-col items-center justify-center h-full opacity-20">
+                  <Search :size="32" class="mb-2" />
+                  <span class="text-[11px]">No matching variables</span>
+                </div>
+
+                <!-- Grid View -->
+                <div v-else-if="isLibraryGrid" class="space-y-4">
+                  <div v-for="(vars, colName) in groupedLibraries" :key="colName" class="space-y-2">
+                    <div class="text-[10px] text-white/30 uppercase font-bold tracking-wider">{{ colName }}</div>
+                    <div class="grid grid-cols-5 gap-2">
+                      <div 
+                        v-for="v in vars" :key="v.id"
+                        @click="selectMode(collections.findLastIndex(c => c.collectionName === v.collectionName), activeMode || '')"
+                        class="aspect-square rounded-md border border-white/10 cursor-pointer overflow-hidden hover:scale-105 transition-transform shadow-sm"
+                        :style="{ backgroundColor: v.colorValue }"
+                        :title="v.name"
+                      ></div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- List View -->
+                <div v-else class="space-y-4">
+                  <div v-for="(vars, colName) in groupedLibraries" :key="colName" class="space-y-1">
+                    <div class="text-[10px] text-white/30 uppercase font-bold tracking-wider mb-2">{{ colName }}</div>
+                    <div 
+                      v-for="v in vars" :key="v.id"
+                      class="flex items-center gap-3 h-8 hover:bg-white/5 px-1 rounded transition-colors cursor-pointer group"
+                    >
+                      <div class="w-4 h-4 rounded border border-white/10" :style="{ backgroundColor: v.colorValue }"></div>
+                      <span class="text-[11px] truncate flex-1 text-white/70 group-hover:text-white">{{ v.name.split('/').pop() }}</span>
+                    </div>
                   </div>
                 </div>
               </div>
             </div>
-          </div>
-
-          <!-- SV Canvas -->
-          <div 
-            class="relative w-full h-32 rounded-md overflow-hidden cursor-crosshair"
-            :style="{ backgroundColor: `hsl(${pickerHsv.h}, 100%, 50%)` }"
-            @mousedown="handleSVMouse"
-          >
-            <div class="absolute inset-0 bg-gradient-to-r from-white to-transparent"></div>
-            <div class="absolute inset-0 bg-gradient-to-t from-black to-transparent"></div>
-            
-            <!-- Handle -->
-            <div 
-              class="absolute w-4 h-4 border-2 border-white rounded-full shadow-[0_0_4px_rgba(0,0,0,0.5)] -translate-x-1/2 -translate-y-1/2 pointer-events-none"
-              :style="{ left: pickerHsv.s + '%', top: (100 - pickerHsv.v) + '%' }"
-            ></div>
-          </div>
-
-          <!-- Hue Slider -->
-          <div 
-            class="relative h-3 rounded-full cursor-pointer rainbow-gradient"
-            @mousedown="handleHueMouse"
-          >
-            <div 
-              class="absolute top-1/2 -translate-y-1/2 w-4 h-4 bg-white border-2 border-[#2C2C2C] rounded-full shadow-md -translate-x-1/2"
-              :style="{ left: (pickerHsv.h / 360 * 100) + '%' }"
-            ></div>
-          </div>
-
-          <!-- Alpha Slider -->
-          <div 
-            class="relative h-3 rounded-full cursor-pointer checkerboard overflow-hidden"
-            @mousedown="handleAlphaMouse"
-          >
-            <div 
-              class="absolute inset-0"
-              :style="{ background: `linear-gradient(to right, transparent, rgba(${pickerRgba.r},${pickerRgba.g},${pickerRgba.b},1))` }"
-            ></div>
-            <div 
-              class="absolute top-1/2 -translate-y-1/2 w-4 h-4 bg-white border-2 border-[#2C2C2C] rounded-full shadow-md -translate-x-1/2"
-              :style="{ left: (pickerHsv.a * 100) + '%' }"
-            ></div>
-          </div>
-
-          <!-- Color Mode Inputs -->
-          <div class="flex gap-1.5 items-stretch h-[28px]">
-            <div v-if="pickerColorMode === 'RGBA'" class="flex flex-1 gap-1">
-              <div v-for="key in ['r','g','b','a']" :key="key" class="flex-1">
-                <input 
-                  :value="pickerRgba[key as keyof typeof pickerRgba]"
-                  @input="(e: any) => handleRgbaInput(key, e.target.value)"
-                  class="w-full h-full bg-white/5 border border-white/10 rounded px-1 text-[11px] text-center outline-none focus:border-figma-accent"
-                />
-              </div>
-            </div>
-            <div v-else-if="pickerColorMode === 'HSLA'" class="flex flex-1 gap-1">
-              <div v-for="key in ['h','s','l','a']" :key="key" class="flex-1">
-                <input 
-                  :value="pickerHsla[key as keyof typeof pickerHsla]"
-                  @input="(e: any) => handleHslaInput(key, e.target.value)"
-                  class="w-full h-full bg-white/5 border border-white/10 rounded px-1 text-[11px] text-center outline-none focus:border-figma-accent"
-                />
-              </div>
-            </div>
-            <div v-else class="flex flex-1">
-              <input 
-                v-model="pickerHex"
-                class="w-full h-full bg-white/5 border border-white/10 rounded px-2 text-[11px] text-center outline-none focus:border-figma-accent font-mono uppercase"
-              />
-            </div>
-            <button 
-              @click="cycleColorMode"
-              class="px-2 bg-white/5 border border-white/10 rounded text-[9px] text-white/50 hover:text-white hover:bg-white/10 transition-all font-bold shrink-0 min-w-[50px] uppercase flex items-center justify-center h-full"
-            >
-              {{ pickerColorMode }}
-            </button>
-          </div>
-
-          <!-- Advanced Settings Toggle -->
-          <div class="pt-2 border-t border-white/5">
-            <button 
-              @click="pickerShowAdvanced = !pickerShowAdvanced"
-              class="flex items-center gap-1.5 text-[11px] text-white/30 hover:text-white/60 transition-colors py-1"
-            >
-              <ChevronRight :size="12" class="transition-transform" :class="{ 'rotate-90': pickerShowAdvanced }" />
-              進階設定
-            </button>
-            
-            <div v-if="pickerShowAdvanced" class="mt-2 space-y-1.5 animate-in fade-in slide-in-from-top-1 duration-200">
-              <label class="text-[11px] font-medium text-white/50">描述</label>
-              <textarea 
-                v-model="pickerDescription"
-                rows="3"
-                placeholder="關於此變數的描述..."
-                class="w-full bg-white/5 border border-white/10 rounded px-2.5 py-1.5 text-[11px] outline-none focus:border-figma-accent resize-none custom-scrollbar"
-              ></textarea>
-            </div>
-          </div>
+          </template>
         </div>
       </div>
     </template>

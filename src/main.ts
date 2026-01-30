@@ -220,14 +220,15 @@ figma.ui.onmessage = async (msg) => {
   }
 
   // 修改變數名稱
-  if (msg.type === 'rename-variable') {
+  if (msg.type === 'rename-variable' || msg.type === 'update-name') {
     const { variableId, newName } = msg;
     try {
       const v = await figma.variables.getVariableByIdAsync(variableId);
       if (v) {
         v.name = newName;
+        // 重新讀取變數以同步 UI
         await refreshVariables();
-        figma.notify(`Renamed to ${newName}`);
+        figma.notify(`Updated variable name`);
       }
     } catch (e) {
       console.error("Failed to rename variable:", e);

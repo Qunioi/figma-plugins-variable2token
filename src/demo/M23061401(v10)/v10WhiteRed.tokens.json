@@ -1,0 +1,229 @@
+{
+  "textColor": {
+    "$type": "color",
+    "$value": {
+      "colorSpace": "srgb",
+      "components": [
+        1,
+        1,
+        1
+      ],
+      "alpha": 1,
+      "hex": "#FFFFFF"
+    },
+    "$extensions": {
+      "com.figma.variableId": "VariableID:1:2017",
+      "com.figma.scopes": [
+        "ALL_SCOPES"
+      ],
+      "com.figma.isOverride": true
+    }
+  },
+  "tabMenuType": {
+    "$type": "string",
+    "$value": "theme10",
+    "$extensions": {
+      "com.figma.variableId": "VariableID:1:2018",
+      "com.figma.scopes": [
+        "ALL_SCOPES"
+      ],
+      "com.figma.type": "string",
+      "com.figma.isOverride": true
+    }
+  },
+  "tabMenuColor": {
+    "$type": "string",
+    "$value": "red",
+    "$extensions": {
+      "com.figma.variableId": "VariableID:1:2019",
+      "com.figma.scopes": [
+        "ALL_SCOPES"
+      ],
+      "com.figma.type": "string",
+      "com.figma.isOverride": true
+    }
+  },
+  "backgroundColor1": {
+    "$type": "color",
+    "$value": {
+      "colorSpace": "srgb",
+      "components": [
+        1,
+        0.6470588445663452,
+        0.5490196347236633
+      ],
+      "alpha": 1,
+      "hex": "#FFA58C"
+    },
+    "$extensions": {
+      "com.figma.variableId": "VariableID:1:2020",
+      "com.figma.scopes": [
+        "ALL_SCOPES"
+      ],
+      "com.figma.isOverride": true
+    }
+  },
+  "backgroundColor2": {
+    "$type": "color",
+    "$value": {
+      "colorSpace": "srgb",
+      "components": [
+        1,
+        0.1921568661928177,
+        0.24313725531101227
+      ],
+      "alpha": 1,
+      "hex": "#FF313E"
+    },
+    "$extensions": {
+      "com.figma.variableId": "VariableID:1:2021",
+      "com.figma.scopes": [
+        "ALL_SCOPES"
+      ],
+      "com.figma.isOverride": true
+    }
+  },
+  "backgroundColor3": {
+    "$type": "color",
+    "$value": {
+      "colorSpace": "srgb",
+      "components": [
+        1,
+        0,
+        0.11372549086809158
+      ],
+      "alpha": 1,
+      "hex": "#FF001D"
+    },
+    "$extensions": {
+      "com.figma.variableId": "VariableID:1:2022",
+      "com.figma.scopes": [
+        "ALL_SCOPES"
+      ],
+      "com.figma.isOverride": true
+    }
+  },
+  "backgroundColor4": {
+    "$type": "color",
+    "$value": {
+      "colorSpace": "srgb",
+      "components": [
+        0.9058823585510254,
+        0.0313725508749485,
+        0.0941176488995552
+      ],
+      "alpha": 1,
+      "hex": "#E70818"
+    },
+    "$extensions": {
+      "com.figma.variableId": "VariableID:1:2023",
+      "com.figma.scopes": [
+        "ALL_SCOPES"
+      ],
+      "com.figma.isOverride": true
+    }
+  },
+  "backgroundColor5": {
+    "$type": "color",
+    "$value": {
+      "colorSpace": "srgb",
+      "components": [
+        0.9803921580314636,
+        0.20392157137393951,
+        0.2823529541492462
+      ],
+      "alpha": 1,
+      "hex": "#FA3448"
+    },
+    "$extensions": {
+      "com.figma.variableId": "VariableID:1:2024",
+      "com.figma.scopes": [
+        "ALL_SCOPES"
+      ],
+      "com.figma.isOverride": true
+    }
+  },
+  "secondaryButton": {
+    "$type": "number",
+    "$value": 2,
+    "$extensions": {
+      "com.figma.variableId": "VariableID:2:616",
+      "com.figma.scopes": [
+        "ALL_SCOPES"
+      ],
+      "com.figma.isOverride": true
+    }
+  },
+  "gameLobbyTab": {
+    "tabMenuBackgroundColorType": {
+      "$type": "string",
+      "$value": "5",
+      "$extensions": {
+        "com.figma.variableId": "VariableID:1:2025",
+        "com.figma.scopes": [
+          "ALL_SCOPES"
+        ],
+        "com.figma.type": "string",
+        "com.figma.isOverride": true
+      }
+    },
+    "tabMenuBackgroundColor1": {
+      "$type": "color",
+      "$value": "{backgroundColor1}",
+      "$extensions": {
+        "com.figma.variableId": "VariableID:1:2026",
+        "com.figma.scopes": [
+          "ALL_SCOPES"
+        ],
+        "com.figma.isOverride": true
+      }
+    },
+    "tabMenuBackgroundColor2": {
+      "$type": "color",
+      "$value": "{backgroundColor2}",
+      "$extensions": {
+        "com.figma.variableId": "VariableID:1:2027",
+        "com.figma.scopes": [
+          "ALL_SCOPES"
+        ],
+        "com.figma.isOverride": true
+      }
+    },
+    "tabMenuBackgroundColor3": {
+      "$type": "color",
+      "$value": "{backgroundColor3}",
+      "$extensions": {
+        "com.figma.variableId": "VariableID:1:2028",
+        "com.figma.scopes": [
+          "ALL_SCOPES"
+        ],
+        "com.figma.isOverride": true
+      }
+    },
+    "tabMenuBackgroundColor4": {
+      "$type": "color",
+      "$value": "{backgroundColor4}",
+      "$extensions": {
+        "com.figma.variableId": "VariableID:1:2029",
+        "com.figma.scopes": [
+          "ALL_SCOPES"
+        ],
+        "com.figma.isOverride": true
+      }
+    },
+    "tabMenuBackgroundColor5": {
+      "$type": "color",
+      "$value": "{backgroundColor5}",
+      "$extensions": {
+        "com.figma.variableId": "VariableID:1:2030",
+        "com.figma.scopes": [
+          "ALL_SCOPES"
+        ],
+        "com.figma.isOverride": true
+      }
+    }
+  },
+  "$extensions": {
+    "com.figma.modeName": "v10WhiteRed"
+  }
+}
