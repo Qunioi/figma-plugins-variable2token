@@ -128,14 +128,18 @@ async function refreshVariables() {
               const v = await figma.variables.getVariableByIdAsync(id);
               if(v) {
                  // 抓取所有模式的值
-                 const valuesByMode = [];
-                 for (const mode of modes) {
+                  const valuesByMode = [];
+                  for (const mode of modes) {
                     const rawVal = v.valuesByMode[mode.modeId];
-                    // 即使是 undefined 也要處理，保持陣列長度一致或標記為空
                     let resolvedVal = "N/A";
+                    let alias = null;
                     if (rawVal !== undefined) {
                         try {
                            resolvedVal = await resolveValue(rawVal, mode.modeId);
+                           if (rawVal && typeof rawVal === 'object' && 'type' in rawVal && rawVal.type === 'VARIABLE_ALIAS') {
+                               const targetVar = await figma.variables.getVariableByIdAsync(rawVal.id);
+                               alias = { id: rawVal.id, name: targetVar ? targetVar.name : 'Unknown' };
+                           }
                         } catch (e) {
                            resolvedVal = "Error";
                         }
@@ -143,9 +147,10 @@ async function refreshVariables() {
                     valuesByMode.push({
                         modeId: mode.modeId,
                         modeName: mode.name,
-                        value: resolvedVal
+                        value: resolvedVal,
+                        alias: alias
                     });
-                 }
+                  }
 
                   resolvedVars.push({
                      id: v.id, // 傳送 ID 供修改使用

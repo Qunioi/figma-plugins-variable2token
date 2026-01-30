@@ -23,7 +23,9 @@ import {
   X,
   LayoutGrid,
   LayoutList,
-  Plus
+  Plus,
+  Settings2,
+  Link
 } from 'lucide-vue-next';
 
 // --- Demo Data Imports ---
@@ -141,7 +143,8 @@ const pickerTarget = ref<{
   type: string, 
   initialName: string, 
   initialValue: string,
-  initialDescription: string
+  initialDescription: string,
+  alias?: { id: string, name: string }
 } | null>(null);
 const pickerHsv = ref({ h: 0, s: 0, v: 0, a: 1 });
 const pickerColorMode = ref<'RGB' | 'Hex' | 'CSS'>('RGB');
@@ -156,6 +159,16 @@ const isVariableInfoExpanded = ref(false);
 const librarySearchQuery = ref('');
 const libraryFilter = ref('All libraries');
 const isColorModeDropdownOpen = ref(false);
+const collapsedLibraryGroups = ref<Set<string>>(new Set());
+const selectedVariableId = ref<string | null>(null);
+
+const toggleLibraryGroup = (name: string) => {
+  if (collapsedLibraryGroups.value.has(name)) {
+    collapsedLibraryGroups.value.delete(name);
+  } else {
+    collapsedLibraryGroups.value.add(name);
+  }
+};
 
 const allVariables = computed(() => {
   const vars: any[] = [];
@@ -173,19 +186,42 @@ const filteredAliasVariables = computed(() => {
 });
 
 const openPicker = (e: MouseEvent, v: any) => {
-  const currentVal = (v.values.find((m: any) => m.modeId === activeMode.value)?.value || v.values[0]?.value || '#000000').toUpperCase();
+  pickerVisible.value = true;
+  selectedVariableId.value = v.id;
+  
+  const modeVal = v.values.find((m: any) => m.modeId === activeMode.value) || v.values[0];
+  const isAlias = !!modeVal?.alias;
+  
+  let currentVal = modeVal?.value || '#000000';
+  let aliasInfo = modeVal?.alias || undefined;
+
+  if (isAlias && aliasInfo) {
+    currentVal = modeVal.value;
+  } else {
+    currentVal = (modeVal?.value || '#000000').toUpperCase();
+  }
+
   pickerTarget.value = { 
     id: v.id, 
     name: v.name.split('/').pop() || '', 
     type: v.type,
     initialName: v.name.split('/').pop() || '',
     initialValue: currentVal,
-    initialDescription: v.description || ""
+    initialDescription: v.description || "",
+    alias: aliasInfo
   };
   pickerInputName.value = pickerTarget.value.name;
   pickerDescription.value = pickerTarget.value.initialDescription;
   pickerShowAdvanced.value = false;
   
+  // 根據是否為 Alias 決定開啟哪個 Tab
+  if (isAlias) {
+    pickerTab.value = 'Libraries';
+  } else {
+    pickerTab.value = 'Custom';
+  }
+  
+  // 如果是 alias，我們依然顯示它當前的解析色值方便調整
   const rgba = hexToRgba(currentVal);
   pickerHsv.value = rgbaToHsva(rgba);
   
@@ -304,6 +340,9 @@ const handleRename = (silent = false) => {
 
 const setVariableAlias = (targetId: string) => {
   if (pickerTarget.value && activeMode.value) {
+    // 邏輯上不能點擊自己 (Self-reference)
+    if (targetId === pickerTarget.value.id) return;
+
     parent.postMessage({ 
       pluginMessage: { 
         type: 'set-variable-alias', 
@@ -312,9 +351,76 @@ const setVariableAlias = (targetId: string) => {
         targetVariableId: targetId 
       } 
     }, '*');
+    
+    // 即時更新 UI
+    const targetVar = allVariables.value.find(av => av.id === targetId);
+    if (targetVar) {
+      pickerTarget.value.alias = { id: targetId, name: targetVar.name.split('/').pop() || targetVar.name };
+      const aliasColor = targetVar.values.find((m: any) => m.modeId === activeMode.value)?.value || targetVar.values[0]?.value;
+      if (aliasColor) {
+        pickerTarget.value.initialValue = aliasColor;
+        const rgba = hexToRgba(aliasColor);
+        pickerHsv.value = rgbaToHsva(rgba);
+      }
+    }
+    
     pickerShowAliasList.value = false;
-    // Alias 更新後直接關閉通知可能較好，但這裡我們先保留邏輯
   }
+};
+
+const detachVariableAlias = () => {
+  if (pickerTarget.value && activeMode.value) {
+    const currentColor = pickerTarget.value.initialValue;
+    // 將連結斷開，並套用當前的色碼
+    parent.postMessage({ 
+      pluginMessage: { 
+        type: 'update-variable', 
+        variableId: pickerTarget.value.id, 
+        modeId: activeMode.value,
+        newValue: currentColor,
+        varType: 'COLOR'
+      } 
+    }, '*');
+
+    pickerTarget.value.alias = undefined;
+    if (currentColor) {
+      const rgba = hexToRgba(currentColor);
+      pickerHsv.value = rgbaToHsva(rgba);
+    }
+    showToastWithTimer('Variable detached and color preserved');
+  }
+};
+
+const switchToCustomTab = () => {
+  if (pickerTarget.value?.alias) {
+    // 連結變數狀態下切換到 Custom，自動繼承顏色並斷開連結
+    const currentColor = pickerTarget.value.initialValue;
+    if (currentColor) {
+      parent.postMessage({
+        pluginMessage: {
+          type: 'update-variable',
+          variableId: pickerTarget.value.id,
+          modeId: activeMode.value,
+          newValue: currentColor,
+          varType: 'COLOR'
+        }
+      }, '*');
+
+      pickerTarget.value.alias = undefined;
+      const rgba = hexToRgba(currentColor);
+      pickerHsv.value = rgbaToHsva(rgba);
+      showToastWithTimer('Converted alias to custom color');
+    }
+  }
+  pickerTab.value = 'Custom';
+};
+
+const getDisplayValue = (v: any) => {
+  const modeVal = v.values.find((m: any) => m.modeId === activeMode.value) || v.values[0];
+  if (modeVal?.alias) {
+    return modeVal.alias.name.split('/').pop() || modeVal.alias.name;
+  }
+  return modeVal?.value || 'N/A';
 };
 
 // 檢查是否有重複的變數名稱
@@ -518,11 +624,11 @@ const showToastWithTimer = (message: string, duration = 3000) => {
   }, duration);
 };
 
-const viewMode = ref<'list' | 'json'>('list');
+const viewMode = ref<'list' | 'grid' | 'json'>('list');
 const hoveredIndex = ref<number | null>(null);
 const hoveredRect = ref<{ top: number; height: number } | null>(null);
 const hoveredVariable = ref<any | null>(null);
-const varHoveredRect = ref<{ top: number; left: number; height: number } | null>(null);
+const varHoveredRect = ref<{ top: number; left: number; height: number; width: number } | null>(null);
 const hoverTimer = ref<any>(null);
 const collapsedSidebarFolders = ref<Set<string>>(new Set());
 
@@ -674,8 +780,11 @@ const groupedLibraries = computed(() => {
   const groups: Record<string, any[]> = {};
   filteredLibraries.value.forEach(v => {
     const colName = v.collectionName;
-    if (!groups[colName]) groups[colName] = [];
-    groups[colName].push(v);
+    const parts = v.name.split('/');
+    const folder = parts.length > 1 ? parts.slice(0, -1).join('/') : 'General';
+    const fullGroupName = `${colName} · ${folder}`;
+    if (!groups[fullGroupName]) groups[fullGroupName] = [];
+    groups[fullGroupName].push(v);
   });
   return groups;
 });
@@ -833,6 +942,20 @@ const anyGroupsExpanded = computed(() => {
   return groupNames.some(g => !collapsedGroups.value.has(g));
 });
 
+const anyLibraryGroupsExpanded = computed(() => {
+  const allGroups = Object.keys(groupedLibraries.value);
+  if (allGroups.length === 0) return false;
+  return allGroups.some(g => !collapsedLibraryGroups.value.has(g));
+});
+
+const toggleLibrarySmartGroups = () => {
+  if (anyLibraryGroupsExpanded.value) {
+    Object.keys(groupedLibraries.value).forEach(g => collapsedLibraryGroups.value.add(g));
+  } else {
+    collapsedLibraryGroups.value.clear();
+  }
+};
+
 const handleWindowResize = (e: MouseEvent) => {
   const startX = e.clientX;
   const startY = e.clientY;
@@ -885,27 +1008,52 @@ const handleSidebarHover = (i: number | null, e?: MouseEvent) => {
   }
 };
 
-const handleVariableHover = (v: any | null, e?: MouseEvent) => {
+const handleVariableHover = (e: MouseEvent | null, v: any | null) => {
   if (hoverTimer.value) {
     clearTimeout(hoverTimer.value);
     hoverTimer.value = null;
   }
 
-  if (!v || !v.description) {
+  if (!v) {
     hoveredVariable.value = null;
+    varHoveredRect.value = null;
     return;
   }
 
   if (e) {
     const target = (e.currentTarget as HTMLElement);
     const rect = target.getBoundingClientRect();
-    varHoveredRect.value = { top: rect.top, left: rect.left, height: rect.height };
+    varHoveredRect.value = { 
+      top: rect.top, 
+      left: rect.left, 
+      height: rect.height,
+      width: rect.width 
+    };
   }
 
-  // 延遲 1 秒顯示
+  // 提升反應速度至 150ms
   hoverTimer.value = setTimeout(() => {
     hoveredVariable.value = v;
-  }, 1000);
+  }, 150);
+};
+
+const getHoveredColor = () => {
+  if (!hoveredVariable.value) return '';
+  // 如果是扁平化的資源庫變數
+  if (hoveredVariable.value.colorValue) return hoveredVariable.value.colorValue;
+  
+  // 如果是主列表變數，根據當前模式尋找值
+  const modeVal = hoveredVariable.value.values?.find((m: any) => m.modeId === activeMode.value) || hoveredVariable.value.values?.[0];
+  if (!modeVal) return '#000000';
+  
+  // 如果插件已經解析好了顏色值，直接返回
+  return (modeVal.value || '#000000').toUpperCase();
+};
+
+const getHoveredAliasName = () => {
+  if (!hoveredVariable.value) return null;
+  const modeVal = hoveredVariable.value.values?.find((m: any) => m.modeId === activeMode.value) || hoveredVariable.value.values?.[0];
+  return modeVal?.alias ? (modeVal.alias.name.split('/').pop() || modeVal.alias.name) : null;
 };
 
 const toggleSidebarFolder = (name: string) => {
@@ -1026,7 +1174,7 @@ watch(activeCollection, (newCol) => {
           </button>
         </div>
 
-        <div class="flex-1 overflow-y-auto pt-2">
+        <div class="flex-1 overflow-y-auto">
           <template v-for="(group, gIdx) in structuredCollections" :key="gIdx">
             <!-- Folder Entry -->
             <template v-if="group.type === 'folder'">
@@ -1182,14 +1330,33 @@ watch(activeCollection, (newCol) => {
               <FoldVertical v-if="anyGroupsExpanded" :size="15" />
               <UnfoldVertical v-else :size="15" />
             </button>
-            <button 
-              @click="viewMode = viewMode === 'list' ? 'json' : 'list'" 
-              :title="viewMode === 'list' ? 'Switch to JSON view' : 'Switch to List view'"
-              class="p-1.5 hover:bg-white/10 rounded transition-colors mr-1"
-            >
-              <Code v-if="viewMode === 'list'" :size="15" />
-              <List v-else :size="15" />
-            </button>
+            <!-- Segmented Control for View Mode -->
+            <div class="flex bg-black/40 p-0.5 rounded-lg border border-white/5 shrink-0">
+              <button 
+                @click="viewMode = 'list'"
+                :title="'List View'"
+                :class="viewMode === 'list' ? 'bg-[#333] text-white shadow-md' : 'text-white/20 hover:text-white/40'"
+                class="p-1.5 rounded-md transition-all duration-200"
+              >
+                <LayoutList :size="14" />
+              </button>
+              <button 
+                @click="viewMode = 'grid'"
+                :title="'Grid View'"
+                :class="viewMode === 'grid' ? 'bg-[#333] text-white shadow-md' : 'text-white/20 hover:text-white/40'"
+                class="p-1.5 rounded-md transition-all duration-200"
+              >
+                <LayoutGrid :size="14" />
+              </button>
+              <button 
+                @click="viewMode = 'json'"
+                :title="'JSON View'"
+                :class="viewMode === 'json' ? 'bg-[#333] text-white shadow-md' : 'text-white/20 hover:text-white/40'"
+                class="p-1.5 rounded-md transition-all duration-200"
+              >
+                <Code :size="14" />
+              </button>
+            </div>
             <button @click="refresh" title="Refresh" class="p-1.5 hover:bg-white/10 rounded transition-colors">
               <RefreshCcw :size="14" />
             </button>
@@ -1213,53 +1380,98 @@ watch(activeCollection, (newCol) => {
 
           <template v-else>
             <!-- List View -->
-            <div v-if="viewMode === 'list'" class="space-y-0">
-              <div v-for="(vars, groupName) in groupedVariables" :key="groupName" class="border-b border-white/5">
+            <div v-if="viewMode === 'list'" class="p-2 space-y-2">
+              <div v-for="(vars, groupName) in groupedVariables" :key="groupName" class="space-y-1">
                 <div 
                   @click="toggleGroup(groupName)"
-                  class="flex items-center gap-2 px-2 h-8 hover:bg-white/[0.03] cursor-pointer transition-colors group"
+                  class="flex items-center gap-2 cursor-pointer group/header"
                 >
-                  <ChevronDown v-if="!collapsedGroups.has(groupName)" :size="12" class="opacity-40" />
-                  <ChevronRight v-else :size="12" class="opacity-40" />
-                  <span class="text-[11px] font-medium text-figma-text/80 tracking-tight flex-1">{{ groupName }}</span>
-                  <span class="text-[9px] opacity-20 font-mono">{{ vars.length }}</span>
+                  <ChevronDown v-if="!collapsedGroups.has(groupName)" :size="12" class="text-white/20 group-hover/header:text-white/40 transition-colors" />
+                  <ChevronRight v-else :size="12" class="text-white/20 group-hover/header:text-white/40 transition-colors" />
+                  <span class="text-[11px] text-white/30 group-hover/header:text-white/50 transition-colors">{{ groupName }}</span>
+                  <div class="h-[1px] flex-1 bg-white/5 ml-2"></div>
+                  <span class="text-[10px] opacity-20 font-mono pr-3">{{ vars.length }}</span>
                 </div>
 
                 <div v-show="!collapsedGroups.has(groupName)">
                   <div 
                     v-for="v in vars" 
                     :key="v.name"
-                    class="flex items-center gap-3 px-6 h-8 group hover:bg-white/[0.04] transition-colors"
-                    @mouseenter="handleVariableHover(v, $event)"
-                    @mouseleave="handleVariableHover(null)"
+                    class="flex items-center gap-3 pl-5 pr-2 h-[34px] group transition-all relative overflow-hidden hover:bg-white/[0.03]"
+                    @mouseenter="handleVariableHover($event, v)"
+                    @mouseleave="handleVariableHover(null, null)"
                   >
                     <!-- Icon / Color Swatch -->
-                    <div v-if="v.type === 'COLOR'" class="relative">
+                    <div v-if="v.type === 'COLOR'" class="relative shrink-0">
                       <div 
-                        class="w-5 h-5 rounded-md border border-figma-border shadow-sm cursor-pointer transition-transform hover:scale-110 overflow-hidden"
+                        class="w-5 h-5 rounded-md border border-figma-border shadow-sm transition-transform hover:scale-110 overflow-hidden cursor-pointer"
                         :style="{ backgroundColor: v.values.find((m:any) => m.modeId === activeMode)?.value || v.values[0]?.value }"
-                        @click="openPicker($event, v)"
+                        @click.stop="openPicker($event, v)"
                       >
                       </div>
                     </div>
-                    <div v-else class="w-5 h-5 flex items-center justify-center rounded-md bg-white/5 border border-figma-border text-[9px] font-bold opacity-60">
+                    <div 
+                      v-else 
+                      class="w-5 h-5 flex items-center justify-center rounded-md bg-white/5 border border-figma-border text-[9px] font-bold opacity-60 shrink-0 cursor-pointer hover:bg-white/10"
+                      @click.stop="openPicker($event, v)"
+                    >
                       {{ v.type === 'BOOLEAN' ? 'B' : v.type === 'FLOAT' ? '#' : 'T' }}
                     </div>
 
                     <!-- Name -->
-                    <div class="flex-1 min-w-0" @click="copyValue(v.name.split('/').pop() || '', 'Name')">
-                      <div class="text-[12px] truncate font-medium cursor-pointer hover:text-figma-accent transition-colors">
+                    <div class="flex-1 min-w-0 pointer-events-auto">
+                      <div 
+                        class="text-[12px] truncate font-medium text-white/60 hover:text-white cursor-pointer transition-colors inline-block"
+                        @click.stop="copyValue(v.name.split('/').pop() || '', 'Name')"
+                      >
                         {{ v.name.split('/').pop() }}
                       </div>
                     </div>
 
                     <!-- Value -->
                     <div 
-                      class="font-mono text-[10px] px-2 py-1 bg-black/20 rounded border border-white/5 opacity-60 hover:opacity-100 hover:bg-figma-accent hover:text-white transition-all cursor-pointer truncate max-w-[140px]"
-                      @click="copyValue(v.values.find((m:any) => m.modeId === activeMode)?.value || v.values[0]?.value, 'Value')"
-                      :title="v.values.find((m:any) => m.modeId === activeMode)?.value"
+                      class="font-mono text-[10px] px-2 py-1 rounded border transition-all truncate max-w-[140px] bg-black/20 border-white/5 text-white/40 group-hover:text-white/70 group-hover:border-white/10"
+                      @click.stop="copyValue(getDisplayValue(v), 'Value')"
+                      :title="getDisplayValue(v)"
                     >
-                      {{ v.values.find((m:any) => m.modeId === activeMode)?.value || 'N/A' }}
+                      {{ getDisplayValue(v) }}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Grid View -->
+            <div v-else-if="viewMode === 'grid'" class="p-2 space-y-2">
+              <div v-for="(vars, groupName) in groupedVariables" :key="groupName" class="space-y-1">
+                <div 
+                  @click="toggleGroup(groupName)"
+                  class="flex items-center gap-2 cursor-pointer group/header"
+                >
+                  <ChevronDown v-if="!collapsedGroups.has(groupName)" :size="12" class="text-white/20 group-hover/header:text-white/40 transition-colors" />
+                  <ChevronRight v-else :size="12" class="text-white/20 group-hover/header:text-white/40 transition-colors" />
+                  <span class="text-[11px] text-white/30 group-hover/header:text-white/50 transition-colors">{{ groupName }}</span>
+                  <div class="h-[1px] flex-1 bg-white/5 ml-2"></div>
+                  <span class="text-[10px] opacity-20 font-mono pr-3">{{ vars.length }}</span>
+                </div>
+
+                <div v-show="!collapsedGroups.has(groupName)" class="grid grid-cols-6 sm:grid-cols-8 md:grid-cols-8 lg:grid-cols-10 xl:grid-cols-12 2xl:grid-cols-16 gap-1.5 pl-4 pr-2">
+                  <div 
+                    v-for="v in vars" 
+                    :key="v.id"
+                    @click="openPicker($event, v)"
+                    @mouseenter="handleVariableHover($event, v)"
+                    @mouseleave="handleVariableHover(null, null)"
+                    class="flex flex-col gap-1.5 group/card cursor-pointer"
+                  >
+                    <div class="aspect-square rounded-lg bg-white/5 border border-white/5 flex items-center justify-center relative overflow-hidden transition-all duration-300 group-hover/card:border-white/20 group-hover/card:scale-105 group-hover/card:shadow-xl">
+                      <div v-if="v.type === 'COLOR'" class="absolute inset-0" :style="{ backgroundColor: v.values.find((m:any) => m.modeId === activeMode)?.value || v.values[0]?.value }"></div>
+                      <span v-else class="text-xs font-bold opacity-20 group-hover/card:opacity-40">{{ v.type === 'BOOLEAN' ? 'B' : v.type === 'FLOAT' ? '#' : 'T' }}</span>
+                      
+                      <!-- Hover Overlay -->
+                      <div class="absolute inset-0 bg-black/20 opacity-0 group-hover/card:opacity-100 transition-opacity flex items-center justify-center">
+                        <Settings2 :size="16" class="text-white drop-shadow-md" />
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -1267,7 +1479,7 @@ watch(activeCollection, (newCol) => {
             </div>
 
             <!-- JSON View -->
-            <div v-else class="h-full flex flex-col pt-0 pb-4">
+            <div v-else-if="viewMode === 'json'" class="h-full flex flex-col pt-0 pb-4">
               <div class="flex items-center justify-between mb-2 px-1">
                 <span class="text-[10px] uppercase font-bold tracking-widest opacity-30">Tokens JSON</span>
                 <div class="flex items-center gap-2">
@@ -1347,7 +1559,7 @@ watch(activeCollection, (newCol) => {
         <div class="flex items-center justify-between px-2 pt-1 border-b border-white/5 bg-[#2C2C2C]">
           <div class="flex">
             <button 
-              @click="pickerTab = 'Custom'"
+              @click="switchToCustomTab"
               class="px-3 py-2 text-[11px] font-medium transition-colors relative"
               :class="pickerTab === 'Custom' ? 'text-white' : 'text-white/40 hover:text-white/60'"
             >
@@ -1369,9 +1581,9 @@ watch(activeCollection, (newCol) => {
         </div>
 
         <!-- Content -->
-        <div class="p-3 space-y-3 relative flex-1">
-          <!-- Variable Name Input -->
-          <div class="relative">
+        <div class="p-3 space-y-3 relative flex-1 flex flex-col min-h-0">
+          <!-- Variable Name Input (Hidden in Libraries tab) -->
+          <div v-if="pickerTab !== 'Libraries'" class="relative shrink-0">
             <input 
               id="picker-name-input"
               v-model="pickerInputName" 
@@ -1386,20 +1598,34 @@ watch(activeCollection, (newCol) => {
             </div>
           </div>
           <template v-if="pickerTab === 'Custom'">
-            <!-- SV Canvas -->
-            <div 
-              class="relative w-full h-[150px] rounded-md overflow-hidden cursor-crosshair shrink-0"
-              :style="{ backgroundColor: `hsl(${pickerHsv.h}, 100%, 50%)` }"
-              @mousedown="handleSVMouse"
-            >
-              <div class="absolute inset-0 bg-gradient-to-r from-white to-transparent"></div>
-              <div class="absolute inset-0 bg-gradient-to-t from-black to-transparent"></div>
+            <!-- Color Display / Alias (Fig 2) -->
+            <div class="px-0.5 mt-1">
+              <div v-if="pickerTarget?.alias" class="flex items-center justify-between bg-white/[0.04] p-1 rounded-md border border-white/[0.06] group/alias">
+                <div class="flex items-center gap-2 px-1 py-0.5 bg-figma-accent/10 rounded border border-figma-accent/20">
+                  <div class="w-2.5 h-2.5 rounded-sm shrink-0" :style="{ backgroundColor: pickerTarget.initialValue }"></div>
+                  <span class="text-[10px] font-medium text-figma-accent truncate max-w-[120px]">{{ pickerTarget.alias.name }}</span>
+                </div>
+                <button 
+                  @click="detachVariableAlias"
+                  class="p-1 text-white/30 hover:text-white/80 hover:bg-white/5 rounded transition-all"
+                  title="Detach variable"
+                >
+                  <Link2Off :size="12" />
+                </button>
+              </div>
               
-              <!-- Handle -->
-              <div 
-                class="absolute w-4 h-4 border-2 border-white rounded-full shadow-[0_2px_4px_rgba(0,0,0,0.3)] -translate-x-1/2 -translate-y-1/2 pointer-events-none"
-                :style="{ left: pickerHsv.s + '%', top: (100 - pickerHsv.v) + '%' }"
-              ></div>
+              <div v-else class="relative w-full h-[150px] rounded-md overflow-hidden cursor-crosshair shrink-0"
+                :style="{ backgroundColor: `hsl(${pickerHsv.h}, 100%, 50%)` }"
+                @mousedown="handleSVMouse"
+              >
+                <div class="absolute inset-0 bg-gradient-to-r from-white to-transparent"></div>
+                <div class="absolute inset-0 bg-gradient-to-t from-black to-transparent"></div>
+                <!-- Handle -->
+                <div 
+                  class="absolute w-4 h-4 border-2 border-white rounded-full shadow-[0_2px_4px_rgba(0,0,0,0.3)] -translate-x-1/2 -translate-y-1/2 pointer-events-none"
+                  :style="{ left: pickerHsv.s + '%', top: (100 - pickerHsv.v) + '%' }"
+                ></div>
+              </div>
             </div>
 
             <!-- Eye dropper & Sliders -->
@@ -1438,9 +1664,9 @@ watch(activeCollection, (newCol) => {
             </div>
 
             <!-- Bottom Row: Mode & Inputs -->
-            <div class="flex gap-1 items-center px-0.5 mt-1 relative">
+            <div class="flex gap-1 items-center px-0.5 mt-0.5 relative">
               <!-- Mode Select -->
-              <div class="w-[52px] shrink-0 h-[24px] relative">
+              <div class="w-[52px] shrink-0 h-[26px] relative">
                 <button 
                   @click.stop="cycleColorMode"
                   class="w-full h-full px-1 bg-black/20 hover:bg-black/40 rounded text-[10px] font-medium transition-all flex items-center justify-between gap-0.5 border border-white/5"
@@ -1464,9 +1690,9 @@ watch(activeCollection, (newCol) => {
               </div>
 
               <!-- Main Input Area -->
-              <div class="flex-1 min-w-0 h-[24px]">
+              <div class="flex-1 min-w-0 h-[26px]">
                 <!-- RGB Inputs -->
-                <div v-if="pickerColorMode === 'RGB'" class="w-full h-full grid grid-cols-3 gap-1">
+                <div v-if="pickerColorMode === 'RGB'" class="w-full h-full grid grid-cols-3 gap-[2px]">
                   <input v-for="key in ['r','g','b']" :key="key"
                     :value="pickerRgba[key as keyof typeof pickerRgba]"
                     @input="(e: any) => handleRgbaInput(key, (e.target as HTMLInputElement).value)"
@@ -1491,7 +1717,7 @@ watch(activeCollection, (newCol) => {
               </div>
 
               <!-- Alpha % (Hidden in CSS mode) -->
-              <div v-if="pickerColorMode !== 'CSS'" class="w-[42px] shrink-0 flex items-center gap-0 h-[24px] px-1 bg-black/20 border border-white/5 rounded">
+              <div v-if="pickerColorMode !== 'CSS'" class="w-[60px] shrink-0 flex items-center gap-0 h-[24px] px-1 bg-black/20 border border-white/5 rounded">
                 <input 
                   :value="Math.round(pickerRgba.a * 100)"
                   @input="(e: any) => handleAlphaInputRelative((e.target as HTMLInputElement).value)"
@@ -1532,51 +1758,50 @@ watch(activeCollection, (newCol) => {
           <template v-else>
             <!-- Libraries Tab Content -->
             <div class="flex flex-col h-[400px] -m-3 overflow-hidden bg-[#2C2C2C]">
-              <!-- Library Toolbar -->
-              <div class="p-3 border-b border-white/5 space-y-3">
-                <div class="relative">
-                  <Search :size="12" class="absolute left-2.5 top-1/2 -translate-y-1/2 opacity-30" />
-                  <input 
-                    v-model="librarySearchQuery"
-                    class="w-full bg-black/20 border border-white/10 rounded-md pl-8 pr-3 py-1.5 text-[11px] outline-none focus:border-figma-accent placeholder:text-white/20 transition-colors"
-                    placeholder="Search variables..."
-                  />
-                </div>
-                <div class="flex items-center justify-between">
-                  <select 
-                    v-model="libraryFilter"
-                    class="bg-transparent text-[11px] text-white/60 border-none outline-none cursor-pointer hover:text-white transition-colors"
-                  >
-                    <option value="All libraries">All libraries</option>
-                    <option v-for="col in collections" :key="col.collectionName" :value="col.collectionName">
-                      {{ col.collectionName }}
-                    </option>
-                  </select>
-                  <div class="flex items-center gap-1">
+              <!-- Library Toolbar (Modern Segmented Design) -->
+              <div class="p-2 border-b border-white/5 space-y-3 bg-[#242424]">
+                <div class="flex items-center gap-1">
+                  <div class="relative flex-1 group/search">
+                    <Search :size="12" class="absolute left-2.5 top-1/2 -translate-y-1/2 text-white/20 group-focus-within/search:text-figma-accent transition-colors" />
+                    <input 
+                      v-model="librarySearchQuery"
+                      class="w-full bg-black/40 border border-white/5 hover:border-white/10 rounded-md pl-8 pr-3 py-1.5 text-[11px] outline-none focus:border-figma-accent/50 focus:bg-black/60 placeholder:text-white/20 transition-all shadow-inner"
+                      placeholder="Search libraries..."
+                    />
+                  </div>
+
+                  <!-- Segmented Control -->
+                  <div class="flex bg-black/40 p-0.5 rounded-lg border border-white/5 shrink-0">
                     <button 
                       @click="isLibraryGrid = false"
-                      :class="!isLibraryGrid ? 'text-white bg-white/10' : 'text-white/30 hover:text-white/60'"
-                      class="p-1 rounded transition-colors"
+                      :class="!isLibraryGrid ? 'bg-[#333] text-white shadow-md' : 'text-white/20 hover:text-white/40'"
+                      class="p-1.5 rounded-md transition-all duration-200"
                     >
                       <LayoutList :size="14" />
                     </button>
                     <button 
                       @click="isLibraryGrid = true"
-                      :class="isLibraryGrid ? 'text-white bg-white/10' : 'text-white/30 hover:text-white/60'"
-                      class="p-1 rounded transition-colors"
+                      :class="isLibraryGrid ? 'bg-[#333] text-white shadow-md' : 'text-white/20 hover:text-white/40'"
+                      class="p-1.5 rounded-md transition-all duration-200"
                     >
                       <LayoutGrid :size="14" />
                     </button>
-                    <div class="w-[1px] h-3 bg-white/10 mx-1"></div>
-                    <button class="p-1 text-white/30 hover:text-white/60 transition-colors">
-                      <Plus :size="14" />
-                    </button>
                   </div>
+
+                  <!-- Fold/Unfold Button -->
+                  <button 
+                    @click="toggleLibrarySmartGroups" 
+                    :title="anyLibraryGroupsExpanded ? 'Collapse All' : 'Expand All'" 
+                    class="px-1 transition-colors text-white/40 hover:text-white/80" 
+                  >
+                    <FoldVertical v-if="anyLibraryGroupsExpanded" :size="15" />
+                    <UnfoldVertical v-else :size="15" />
+                  </button>
                 </div>
               </div>
 
               <!-- Content Scroll Area -->
-              <div class="flex-1 overflow-y-auto custom-scrollbar p-3">
+              <div class="flex-1 overflow-y-auto custom-scrollbar p-2">
                 <div v-if="filteredLibraries.length === 0" class="flex flex-col items-center justify-center h-full opacity-20">
                   <Search :size="32" class="mb-2" />
                   <span class="text-[11px]">No matching variables</span>
@@ -1584,30 +1809,77 @@ watch(activeCollection, (newCol) => {
 
                 <!-- Grid View -->
                 <div v-else-if="isLibraryGrid" class="space-y-4">
-                  <div v-for="(vars, colName) in groupedLibraries" :key="colName" class="space-y-2">
-                    <div class="text-[10px] text-white/30 uppercase font-bold tracking-wider">{{ colName }}</div>
-                    <div class="grid grid-cols-5 gap-2">
+                  <div v-for="(vars, groupFullName) in groupedLibraries" :key="groupFullName" class="space-y-2">
+                    <div 
+                      @click="toggleLibraryGroup(groupFullName as string)"
+                      class="flex items-center gap-1 cursor-pointer group/header mb-1 px-1"
+                    >
+                      <ChevronDown v-if="!collapsedLibraryGroups.has(groupFullName as string)" :size="10" class="text-white/20 group-hover/header:text-white/40 transition-transform" />
+                      <ChevronRight v-else :size="10" class="text-white/20 group-hover/header:text-white/40 transition-transform" />
+                      <div class="text-[9px] text-white/30 group-hover/header:text-white/50 transition-colors uppercase tracking-tight">{{ groupFullName }}</div>
+                      <div class="h-[1px] flex-1 bg-white/5 ml-2"></div>
+                      <span class="text-[9px] opacity-10 font-mono">{{ vars.length }}</span>
+                    </div>
+
+                    
+                    <div v-if="!collapsedLibraryGroups.has(groupFullName as string)" class="grid grid-cols-8 gap-1 pl-4 pr-1">
                       <div 
                         v-for="v in vars" :key="v.id"
-                        @click="selectMode(collections.findLastIndex(c => c.collectionName === v.collectionName), activeMode || '')"
-                        class="aspect-square rounded-md border border-white/10 cursor-pointer overflow-hidden hover:scale-105 transition-transform shadow-sm"
+                        @click="setVariableAlias(v.id)"
+                        @mouseenter="handleVariableHover($event, v)"
+                        @mouseleave="handleVariableHover(null, null)"
+                        class="aspect-square rounded-md shadow-sm transition-all duration-300 relative group/griditem overflow-visible"
+                        :class="pickerTarget?.id === v.id ? 'cursor-not-allowed grayscale-[0.8] opacity-40' : 'cursor-pointer'"
                         :style="{ backgroundColor: v.colorValue }"
-                        :title="v.name"
-                      ></div>
+                      >
+                        <!-- Active Glow Effect -->
+                        <div v-if="pickerTarget?.alias?.id === v.id" class="absolute -inset-[1px] rounded-lg border-2 border-figma-accent z-10 scale-105 flex items-center justify-center bg-figma-accent/10">
+                           <!-- <Check :size="10" class="text-white drop-shadow-md" /> -->
+                        </div>
+                        <div v-else-if="pickerTarget?.id !== v.id" class="absolute inset-0 rounded-md border border-white/10 group-hover/griditem:border-white/30 group-hover/griditem:scale-110 transition-all group-hover/griditem:shadow-lg"></div>
+                        
+                        <!-- Self Reference Disable Mark -->
+                        <div v-if="pickerTarget?.id === v.id" class="absolute inset-0 flex items-center justify-center">
+                          <X :size="12" class="text-red-500 stroke-[3px]" />
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>
 
                 <!-- List View -->
                 <div v-else class="space-y-4">
-                  <div v-for="(vars, colName) in groupedLibraries" :key="colName" class="space-y-1">
-                    <div class="text-[10px] text-white/30 uppercase font-bold tracking-wider mb-2">{{ colName }}</div>
+                  <div v-for="(vars, groupFullName) in groupedLibraries" :key="groupFullName" class="space-y-1">
                     <div 
-                      v-for="v in vars" :key="v.id"
-                      class="flex items-center gap-3 h-8 hover:bg-white/5 px-1 rounded transition-colors cursor-pointer group"
+                      @click="toggleLibraryGroup(groupFullName as string)"
+                      class="flex items-center gap-1 cursor-pointer group/header mb-1 px-1"
                     >
-                      <div class="w-4 h-4 rounded border border-white/10" :style="{ backgroundColor: v.colorValue }"></div>
-                      <span class="text-[11px] truncate flex-1 text-white/70 group-hover:text-white">{{ v.name.split('/').pop() }}</span>
+                      <ChevronDown v-if="!collapsedLibraryGroups.has(groupFullName as string)" :size="10" class="text-white/20 group-hover/header:text-white/40 transition-transform" />
+                      <ChevronRight v-else :size="10" class="text-white/20 group-hover/header:text-white/40 transition-transform" />
+                      <div class="text-[9px] text-white/30 group-hover/header:text-white/50 transition-colors uppercase tracking-tight">{{ groupFullName }}</div>
+                      <div class="h-[1px] flex-1 bg-white/5 ml-2"></div>
+                      <span class="text-[9px] opacity-10 font-mono">{{ vars.length }}</span>
+                    </div>
+
+                    <div v-if="!collapsedLibraryGroups.has(groupFullName as string)">
+                      <div 
+                        v-for="v in vars" :key="v.id"
+                        @click="setVariableAlias(v.id)"
+                        @mouseenter="handleVariableHover($event, v)"
+                        @mouseleave="handleVariableHover(null, null)"
+                        class="flex items-center gap-2.5 h-[28px] px-4 rounded-lg transition-all relative overflow-hidden"
+                        :class="[
+                          pickerTarget?.alias?.id === v.id ? 'bg-white/[0.02]' : 'hover:bg-white/5',
+                          pickerTarget?.id === v.id ? 'cursor-not-allowed opacity-30 grayscale' : 'cursor-pointer group'
+                        ]"
+                      >
+                        <!-- for active -->
+                        <div class="w-4 h-4 rounded-md border border-white/10 shrink-0 shadow-sm" :style="{ backgroundColor: v.colorValue }"></div>
+                        <span class="text-[11px] truncate flex-1 transition-colors" :class="pickerTarget?.alias?.id === v.id ? 'text-white font-bold' : 'text-white/60 group-hover:text-white/90'">{{ v.name.split('/').pop() }}</span>
+                        
+                        <Check v-if="pickerTarget?.alias?.id === v.id" :size="12" class="text-white shrink-0" />
+                        <X v-if="pickerTarget?.id === v.id" :size="12" class="text-red-500/50 shrink-0" />
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -1618,18 +1890,47 @@ watch(activeCollection, (newCol) => {
       </div>
     </template>
 
-    <!-- Variable Description Tooltip -->
-    <transition name="tooltip">
+    <!-- Variable Tooltip (Detailed Box Style) -->
+    <transition name="tooltip-box">
       <div 
         v-if="hoveredVariable && varHoveredRect" 
-        class="fixed px-2.5 py-1.5 bg-[#2C2C2C] border border-[#3C3C3C] text-white rounded-md z-[3000] whitespace-nowrap shadow-[0_4px_12px_rgba(0,0,0,0.5)] pointer-events-none text-[11px]"
+        class="fixed p-2.5 bg-[#1E1E1E] text-white rounded-lg shadow-[0_12px_32px_rgba(0,0,0,0.8)] z-[99999] pointer-events-none border border-white/10 flex flex-col gap-2 min-w-[140px] max-w-[200px]"
         :style="{ 
-          top: varHoveredRect.top + varHoveredRect.height / 2 + 'px', 
-          left: varHoveredRect.left + 80 + 'px',
-          transform: 'translateY(-50%)' 
+          top: (varHoveredRect.top - 8) + 'px', 
+          left: (varHoveredRect.left + varHoveredRect.width / 2) + 'px',
+          transform: 'translateX(-50%) translateY(-100%)' 
         }"
       >
-        {{ hoveredVariable.description }}
+        <!-- Name -->
+        <div class="text-[11px] font-bold text-white/90 truncate leading-tight">
+          {{ hoveredVariable.name.split('/').pop() }}
+        </div>
+        
+        <!-- Color Info Area -->
+        <div class="flex flex-col gap-1.5 px-2 py-2 bg-white/[0.03] rounded-md border border-white/5">
+          <div class="flex items-center gap-2.5">
+            <div 
+              class="w-5 h-5 rounded border border-white/20 shrink-0 shadow-sm" 
+              :style="{ backgroundColor: getHoveredColor() }"
+            ></div>
+            <div class="flex flex-col min-w-0">
+              <!-- Linked Name (Alias) -->
+              <div v-if="getHoveredAliasName()" class="flex items-center gap-1 min-w-0 mb-0.5">
+                <Link :size="8" class="text-figma-accent shrink-0" />
+                <span class="text-[10px] font-bold text-figma-accent truncate leading-none">{{ getHoveredAliasName() }}</span>
+              </div>
+              <span class="text-[9px] font-mono text-white/50 uppercase tracking-wider leading-none">{{ getHoveredColor() }}</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Description -->
+        <div v-if="hoveredVariable.description" class="text-[9px] text-white/40 leading-relaxed italic break-words">
+          {{ hoveredVariable.description }}
+        </div>
+        
+        <!-- Arrow -->
+        <div class="absolute top-[calc(100%-1px)] left-1/2 -translate-x-1/2 w-0 h-0 border-l-[6px] border-l-transparent border-r-[6px] border-r-transparent border-t-[6px] border-t-[#1E1E1E]"></div>
       </div>
     </transition>
   </div>
@@ -1639,8 +1940,8 @@ watch(activeCollection, (newCol) => {
 .toast-enter-active, .toast-leave-active { transition: all 0.2s ease; }
 .toast-enter-from, .toast-leave-to { opacity: 0; transform: translate(-50%, 10px); }
 
-.tooltip-enter-active, .tooltip-leave-active { transition: opacity 0.15s ease, transform 0.15s ease; }
-.tooltip-enter-from, .tooltip-leave-to { opacity: 0; transform: translateY(-50%) translateX(-5px); }
+.tooltip-box-enter-active, .tooltip-box-leave-active { transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1); }
+.tooltip-box-enter-from, .tooltip-box-leave-to { opacity: 0; transform: translateX(-50%) translateY(-100%) scale(0.95); }
 
 .custom-scrollbar::-webkit-scrollbar { width: 8px; }
 .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
