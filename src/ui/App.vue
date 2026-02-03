@@ -150,6 +150,7 @@ const pickerHsv = ref({ h: 0, s: 0, v: 0, a: 1 });
 const pickerColorMode = ref<'RGB' | 'Hex' | 'CSS'>('RGB');
 const pickerTab = ref<'Custom' | 'Libraries'>('Custom');
 const pickerInputName = ref('');
+const pickerInputValue = ref('');
 const pickerDescription = ref('');
 const pickerShowAliasList = ref(false);
 const pickerShowAdvanced = ref(false);
@@ -192,13 +193,19 @@ const openPicker = (e: MouseEvent, v: any) => {
   const modeVal = v.values.find((m: any) => m.modeId === activeMode.value) || v.values[0];
   const isAlias = !!modeVal?.alias;
   
-  let currentVal = modeVal?.value || '#000000';
+  let currentVal = modeVal?.value;
   let aliasInfo = modeVal?.alias || undefined;
 
-  if (isAlias && aliasInfo) {
-    currentVal = modeVal.value;
+  // 只有 COLOR 類型才需要處理 hex 格式
+  if (v.type === 'COLOR') {
+    if (isAlias && aliasInfo) {
+      currentVal = modeVal.value;
+    } else {
+      currentVal = (modeVal?.value || '#000000').toUpperCase();
+    }
   } else {
-    currentVal = (modeVal?.value || '#000000').toUpperCase();
+    // STRING / FLOAT 類型保持原始值
+    currentVal = modeVal?.value ?? '';
   }
 
   pickerTarget.value = { 
@@ -206,11 +213,12 @@ const openPicker = (e: MouseEvent, v: any) => {
     name: v.name.split('/').pop() || '', 
     type: v.type,
     initialName: v.name.split('/').pop() || '',
-    initialValue: currentVal,
+    initialValue: v.type === 'COLOR' ? currentVal : String(currentVal),
     initialDescription: v.description || "",
     alias: aliasInfo
   };
   pickerInputName.value = pickerTarget.value.name;
+  pickerInputValue.value = String(currentVal);
   pickerDescription.value = pickerTarget.value.initialDescription;
   pickerShowAdvanced.value = false;
   
@@ -226,16 +234,21 @@ const openPicker = (e: MouseEvent, v: any) => {
   pickerHsv.value = rgbaToHsva(rgba);
   
   // Position calculation
-  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-  const pickerWidth = 320;
-  const pickerHeight = 420; // 精確的 UI 高度
+  // 找到父層的列表項目元素，而不是只用點擊的小圖標
+  const clickedElement = e.currentTarget as HTMLElement;
+  const rowElement = clickedElement.closest('.flex.items-center.gap-3') as HTMLElement || clickedElement;
+  const rect = rowElement.getBoundingClientRect();
   
-  let top = rect.bottom + 8;
+  const pickerWidth = 260; // 與 CSS w-[260px] 一致
+  // 根據變數類型決定 picker 高度
+  const pickerHeight = v.type === 'COLOR' ? 400 : 180;
+  
+  let top = rect.bottom + 4; // 縮減往下的間距
   let left = rect.left;
 
-  // 如果下方空間不夠，就往上彈
+  // 如果下方空間不夠，就往上彈（直接貼緊元素上方）
   if (top + pickerHeight > window.innerHeight) {
-    top = Math.max(10, rect.top - pickerHeight - 8);
+    top = Math.max(10, rect.top - pickerHeight);
   }
 
   // 確保左右不超出
@@ -255,6 +268,17 @@ const updateFromPicker = () => {
   const hex = rgbaToHex(rgba);
   // 使用靜默模式更新，拖拽中不顯示通知
   updateVariable(pickerTarget.value.id, hex, pickerTarget.value.type, undefined, undefined, true);
+};
+
+const handleValueInput = (val: string) => {
+  if (!pickerTarget.value) return;
+  const type = pickerTarget.value.type;
+  let finalValue: any = val;
+  if (type === 'FLOAT') {
+    finalValue = parseFloat(val);
+    if (isNaN(finalValue)) return;
+  }
+  updateVariable(pickerTarget.value.id, finalValue, type, undefined, undefined, true);
 };
 
 const resetPickerName = () => {
@@ -464,19 +488,26 @@ const closePicker = () => {
   }
   
   if (pickerTarget.value) {
-    const currentHex8 = rgbaToHex8(hsvaToRgba(pickerHsv.value)).toUpperCase();
-    const initialHex8 = rgbaToHex8(hexToRgba(pickerTarget.value.initialValue)).toUpperCase();
-    
     const nameChanged = pickerInputName.value !== pickerTarget.value.initialName;
-    const colorChanged = currentHex8 !== initialHex8;
     const descChanged = pickerDescription.value !== pickerTarget.value.initialDescription;
     
-    if (nameChanged || colorChanged || descChanged) {
+    // 根據變數類型判斷 value 是否有變化
+    let valueChanged = false;
+    if (pickerTarget.value.type === 'COLOR') {
+      const currentHex8 = rgbaToHex8(hsvaToRgba(pickerHsv.value)).toUpperCase();
+      const initialHex8 = rgbaToHex8(hexToRgba(pickerTarget.value.initialValue)).toUpperCase();
+      valueChanged = currentHex8 !== initialHex8;
+    } else {
+      // 對於 STRING/FLOAT 類型，比較 pickerInputValue
+      valueChanged = pickerInputValue.value !== pickerTarget.value.initialValue;
+    }
+    
+    if (nameChanged || valueChanged || descChanged) {
        // 只有在真正有修改時才顯示通知並紀錄歷史
        lastChange.value = { 
          variableId: pickerTarget.value.id, 
          modeId: activeMode.value!, 
-         oldValue: colorChanged ? pickerTarget.value.initialValue : undefined,
+         oldValue: valueChanged ? pickerTarget.value.initialValue : undefined,
          oldName: nameChanged ? pickerTarget.value.initialName : undefined,
          oldDescription: descChanged ? pickerTarget.value.initialDescription : undefined,
          varType: pickerTarget.value.type, 
@@ -630,6 +661,7 @@ const hoveredRect = ref<{ top: number; height: number } | null>(null);
 const hoveredVariable = ref<any | null>(null);
 const varHoveredRect = ref<{ top: number; left: number; height: number; width: number } | null>(null);
 const hoverTimer = ref<any>(null);
+const mousePos = ref({ x: 0, y: 0 });
 const collapsedSidebarFolders = ref<Set<string>>(new Set());
 
 // 歷史紀錄練習
@@ -731,6 +763,12 @@ const currentModeName = computed(() => {
   return mode ? mode.name : 'tokens';
 });
 
+const tooltipPlacement = computed(() => {
+  if (!mousePos.value.y) return 'top';
+  // If the space above is less than 160px (approx tooltip height), show at bottom
+  return mousePos.value.y < 160 ? 'bottom' : 'top';
+});
+
 const documentColors = computed(() => {
   if (!activeCollection.value) return [];
   const colors = new Set<string>();
@@ -788,6 +826,13 @@ const groupedLibraries = computed(() => {
   });
   return groups;
 });
+
+const selectCollection = (index: number) => {
+  activeIndex.value = index;
+  if (collections.value[index]?.modes?.length > 0) {
+    activeMode.value = collections.value[index].modes[0].modeId;
+  }
+};
 
 const selectMode = (collectionIndex: number, modeId: string) => {
   activeIndex.value = collectionIndex;
@@ -1008,6 +1053,10 @@ const handleSidebarHover = (i: number | null, e?: MouseEvent) => {
   }
 };
 
+const handleMouseMove = (e: MouseEvent) => {
+  mousePos.value = { x: e.clientX, y: e.clientY };
+};
+
 const handleVariableHover = (e: MouseEvent | null, v: any | null) => {
   if (hoverTimer.value) {
     clearTimeout(hoverTimer.value);
@@ -1021,6 +1070,7 @@ const handleVariableHover = (e: MouseEvent | null, v: any | null) => {
   }
 
   if (e) {
+    mousePos.value = { x: e.clientX, y: e.clientY };
     const target = (e.currentTarget as HTMLElement);
     const rect = target.getBoundingClientRect();
     varHoveredRect.value = { 
@@ -1210,28 +1260,28 @@ watch(activeCollection, (newCol) => {
                   </div>
                   
                   <div class="text-[11px] truncate flex-1 pl-3">{{ child.displayName }}</div>
-                </div>
 
-                <!-- Modes Tree for folder children -->
-                <div v-if="!collapsedSidebarFolders.has('child_' + child.originalIndex) && collections[child.originalIndex]?.modes?.length >= 1" class="ml-4 relative">
-                  <div 
-                    v-for="(mode, mIdx) in collections[child.originalIndex].modes" 
-                    :key="mode.modeId"
-                    @click.stop="selectMode(child.originalIndex, mode.modeId)"
-                    class="flex items-center h-8 cursor-pointer transition-all relative mr-2 ml-4 rounded-md"
-                    :class="[
-                      activeIndex === child.originalIndex && activeMode === mode.modeId ? 'bg-white/[0.08] text-white' : 'text-white/50 hover:bg-white/5'
-                    ]"
-                  >
-                    <!-- Tree lines -->
-                    <div class="absolute -left-3 h-full flex flex-col items-center">
-                      <!-- Vertical line: only top half if it's the last item -->
-                      <div class="w-[1px] bg-[#444]" :class="mIdx === collections[child.originalIndex].modes.length - 1 ? 'h-1/2' : 'h-full'"></div>
-                      <!-- Horizontal dot/line -->
-                      <div class="absolute top-1/2 left-0 w-3 h-[1px] bg-[#444]"></div>
+                  <!-- Modes Tree for folder children -->
+                  <div v-if="!collapsedSidebarFolders.has('child_' + child.originalIndex) && collections[child.originalIndex]?.modes?.length >= 1" class="ml-4 relative">
+                    <div 
+                      v-for="(mode, mIdx) in collections[child.originalIndex].modes" 
+                      :key="mode.modeId"
+                      @click.stop="selectMode(child.originalIndex, mode.modeId)"
+                      class="flex items-center h-8 cursor-pointer transition-all relative mr-2 ml-4 rounded-md"
+                      :class="[
+                        activeIndex === child.originalIndex && activeMode === mode.modeId ? 'bg-white/[0.08] text-white' : 'text-white/50 hover:bg-white/5'
+                      ]"
+                    >
+                      <!-- Tree lines -->
+                      <div class="absolute -left-3 h-full flex flex-col items-center">
+                        <!-- Vertical line: only top half if it's the last item -->
+                        <div class="w-[1px] bg-[#444]" :class="mIdx === collections[child.originalIndex].modes.length - 1 ? 'h-1/2' : 'h-full'"></div>
+                        <!-- Horizontal dot/line -->
+                        <div class="absolute top-1/2 left-0 w-3 h-[1px] bg-[#444]"></div>
+                      </div>
+                      
+                      <div class="text-[11px] truncate flex-1 pl-3">{{ mode.name }}</div>
                     </div>
-                    
-                    <div class="text-[11px] truncate flex-1 pl-3">{{ mode.name }}</div>
                   </div>
                 </div>
               </div>
@@ -1394,13 +1444,14 @@ watch(activeCollection, (newCol) => {
                 </div>
 
                 <div v-show="!collapsedGroups.has(groupName)">
-                  <div 
-                    v-for="v in vars" 
-                    :key="v.name"
-                    class="flex items-center gap-3 pl-5 pr-2 h-[34px] group transition-all relative overflow-hidden hover:bg-white/[0.03]"
-                    @mouseenter="handleVariableHover($event, v)"
-                    @mouseleave="handleVariableHover(null, null)"
-                  >
+                    <div 
+                      v-for="v in vars" 
+                      :key="v.name"
+                      class="flex items-center gap-3 pl-5 pr-2 h-[34px] group transition-all relative overflow-hidden hover:bg-white/[0.03]"
+                      @mouseenter="handleVariableHover($event, v)"
+                      @mousemove="handleMouseMove"
+                      @mouseleave="handleVariableHover(null, null)"
+                    >
                     <!-- Icon / Color Swatch -->
                     <div v-if="v.type === 'COLOR'" class="relative shrink-0">
                       <div 
@@ -1461,6 +1512,7 @@ watch(activeCollection, (newCol) => {
                     :key="v.id"
                     @click="openPicker($event, v)"
                     @mouseenter="handleVariableHover($event, v)"
+                    @mousemove="handleMouseMove"
                     @mouseleave="handleVariableHover(null, null)"
                     class="flex flex-col gap-1.5 group/card cursor-pointer"
                   >
@@ -1581,9 +1633,10 @@ watch(activeCollection, (newCol) => {
         </div>
 
         <!-- Content -->
-        <div class="p-3 space-y-3 relative flex-1 flex flex-col min-h-0">
+        <div class="p-3 space-y-2 relative flex-1 flex flex-col min-h-0">
           <!-- Variable Name Input (Hidden in Libraries tab) -->
           <div v-if="pickerTab !== 'Libraries'" class="relative shrink-0">
+            <div class="text-[10px] text-white/40 px-0.5">Name</div>
             <input 
               id="picker-name-input"
               v-model="pickerInputName" 
@@ -1593,139 +1646,156 @@ watch(activeCollection, (newCol) => {
               :class="isDuplicateName ? 'border-red-500 focus:border-red-500' : 'border-white/10 focus:border-figma-accent'"
               placeholder="Name"
             />
-            <div v-if="isDuplicateName" class="text-[9px] text-red-400 mt-1 flex items-center gap-1">
+            <div v-if="isDuplicateName" class="text-[9px] text-red-400 mt-0.5 flex items-center gap-1">
               <span>變數名稱已存在</span>
             </div>
           </div>
           <template v-if="pickerTab === 'Custom'">
-            <!-- Color Display / Alias (Fig 2) -->
-            <div class="px-0.5 mt-1">
-              <div v-if="pickerTarget?.alias" class="flex items-center justify-between bg-white/[0.04] p-1 rounded-md border border-white/[0.06] group/alias">
-                <div class="flex items-center gap-2 px-1 py-0.5 bg-figma-accent/10 rounded border border-figma-accent/20">
-                  <div class="w-2.5 h-2.5 rounded-sm shrink-0" :style="{ backgroundColor: pickerTarget.initialValue }"></div>
-                  <span class="text-[10px] font-medium text-figma-accent truncate max-w-[120px]">{{ pickerTarget.alias.name }}</span>
+            <template v-if="pickerTarget?.type === 'COLOR'">
+              <!-- Color Display / Alias (Fig 2) -->
+              <div class="px-0.5 mt-1">
+                <div v-if="pickerTarget?.alias" class="flex items-center justify-between bg-white/[0.04] p-1 rounded-md border border-white/[0.06] group/alias">
+                  <div class="flex items-center gap-2 px-1 py-0.5 bg-figma-accent/10 rounded border border-figma-accent/20">
+                    <div class="w-2.5 h-2.5 rounded-sm shrink-0" :style="{ backgroundColor: pickerTarget.initialValue }"></div>
+                    <span class="text-[10px] font-medium text-figma-accent truncate max-w-[120px]">{{ pickerTarget.alias.name }}</span>
+                  </div>
+                  <button 
+                    @click="detachVariableAlias"
+                    class="p-1 text-white/30 hover:text-white/80 hover:bg-white/5 rounded transition-all"
+                    title="Detach variable"
+                  >
+                    <Link2Off :size="12" />
+                  </button>
                 </div>
-                <button 
-                  @click="detachVariableAlias"
-                  class="p-1 text-white/30 hover:text-white/80 hover:bg-white/5 rounded transition-all"
-                  title="Detach variable"
+                
+                <div v-else class="relative w-full h-[150px] rounded-md overflow-hidden cursor-crosshair shrink-0"
+                  :style="{ backgroundColor: `hsl(${pickerHsv.h}, 100%, 50%)` }"
+                  @mousedown="handleSVMouse"
                 >
-                  <Link2Off :size="12" />
-                </button>
-              </div>
-              
-              <div v-else class="relative w-full h-[150px] rounded-md overflow-hidden cursor-crosshair shrink-0"
-                :style="{ backgroundColor: `hsl(${pickerHsv.h}, 100%, 50%)` }"
-                @mousedown="handleSVMouse"
-              >
-                <div class="absolute inset-0 bg-gradient-to-r from-white to-transparent"></div>
-                <div class="absolute inset-0 bg-gradient-to-t from-black to-transparent"></div>
-                <!-- Handle -->
-                <div 
-                  class="absolute w-4 h-4 border-2 border-white rounded-full shadow-[0_2px_4px_rgba(0,0,0,0.3)] -translate-x-1/2 -translate-y-1/2 pointer-events-none"
-                  :style="{ left: pickerHsv.s + '%', top: (100 - pickerHsv.v) + '%' }"
-                ></div>
-              </div>
-            </div>
-
-            <!-- Eye dropper & Sliders -->
-            <div class="flex items-center gap-2 py-1">
-              <button class="p-1.5 hover:bg-white/10 rounded transition-colors text-white/70">
-                <Pipette :size="14" />
-              </button>
-              
-              <div class="flex-1 space-y-3">
-                <!-- Hue Slider -->
-                <div 
-                  class="relative h-2.5 rounded-full cursor-pointer rainbow-gradient"
-                  @mousedown="handleHueMouse"
-                >
+                  <div class="absolute inset-0 bg-gradient-to-r from-white to-transparent"></div>
+                  <div class="absolute inset-0 bg-gradient-to-t from-black to-transparent"></div>
+                  <!-- Handle -->
                   <div 
-                    class="absolute top-1/2 -translate-y-1/2 w-3.5 h-3.5 bg-white border border-black/20 rounded-full shadow-md -translate-x-1/2"
-                    :style="{ left: (pickerHsv.h / 360 * 100) + '%' }"
-                  ></div>
-                </div>
-
-                <!-- Alpha Slider -->
-                <div 
-                  class="relative h-2.5 rounded-full cursor-pointer checkerboard overflow-hidden"
-                  @mousedown="handleAlphaMouse"
-                >
-                  <div 
-                    class="absolute inset-0"
-                    :style="{ background: `linear-gradient(to right, transparent, rgba(${pickerRgba.r},${pickerRgba.g},${pickerRgba.b},1))` }"
-                  ></div>
-                  <div 
-                    class="absolute top-1/2 -translate-y-1/2 w-3.5 h-3.5 bg-white border border-black/20 rounded-full shadow-md -translate-x-1/2"
-                    :style="{ left: (pickerHsv.a * 100) + '%' }"
+                    class="absolute w-4 h-4 border-2 border-white rounded-full shadow-[0_2px_4px_rgba(0,0,0,0.3)] -translate-x-1/2 -translate-y-1/2 pointer-events-none"
+                    :style="{ left: pickerHsv.s + '%', top: (100 - pickerHsv.v) + '%' }"
                   ></div>
                 </div>
               </div>
-            </div>
 
-            <!-- Bottom Row: Mode & Inputs -->
-            <div class="flex gap-1 items-center px-0.5 mt-0.5 relative">
-              <!-- Mode Select -->
-              <div class="w-[52px] shrink-0 h-[26px] relative">
-                <button 
-                  @click.stop="cycleColorMode"
-                  class="w-full h-full px-1 bg-black/20 hover:bg-black/40 rounded text-[10px] font-medium transition-all flex items-center justify-between gap-0.5 border border-white/5"
-                >
-                  <span class="truncate">{{ pickerColorMode }}</span>
-                  <ChevronDown :size="10" class="shrink-0 opacity-40" />
+              <!-- Eye dropper & Sliders -->
+              <div class="flex items-center gap-2 py-1">
+                <button class="p-1.5 hover:bg-white/10 rounded transition-colors text-white/70">
+                  <Pipette :size="14" />
                 </button>
                 
-                <!-- Dropdown Menu -->
-                <div v-if="isColorModeDropdownOpen" class="absolute bottom-full left-0 mb-1 w-[70px] bg-[#333] border border-[#444] rounded shadow-xl z-50 overflow-hidden">
+                <div class="flex-1 space-y-3">
+                  <!-- Hue Slider -->
                   <div 
-                    v-for="mode in (['RGB', 'Hex', 'CSS'] as const)" 
-                    :key="mode"
-                    @click="pickerColorMode = mode; isColorModeDropdownOpen = false"
-                    class="px-2 py-1.5 text-[10px] hover:bg-figma-accent hover:text-white cursor-pointer transition-colors"
-                    :class="{ 'text-figma-accent font-bold': pickerColorMode === mode }"
+                    class="relative h-2.5 rounded-full cursor-pointer rainbow-gradient"
+                    @mousedown="handleHueMouse"
                   >
-                    {{ mode }}
+                    <div 
+                      class="absolute top-1/2 -translate-y-1/2 w-3.5 h-3.5 bg-white border border-black/20 rounded-full shadow-md -translate-x-1/2"
+                      :style="{ left: (pickerHsv.h / 360 * 100) + '%' }"
+                    ></div>
+                  </div>
+
+                  <!-- Alpha Slider -->
+                  <div 
+                    class="relative h-2.5 rounded-full cursor-pointer checkerboard overflow-hidden"
+                    @mousedown="handleAlphaMouse"
+                  >
+                    <div 
+                      class="absolute inset-0"
+                      :style="{ background: `linear-gradient(to right, transparent, rgba(${pickerRgba.r},${pickerRgba.g},${pickerRgba.b},1))` }"
+                    ></div>
+                    <div 
+                      class="absolute top-1/2 -translate-y-1/2 w-3.5 h-3.5 bg-white border border-black/20 rounded-full shadow-md -translate-x-1/2"
+                      :style="{ left: (pickerHsv.a * 100) + '%' }"
+                    ></div>
                   </div>
                 </div>
               </div>
 
-              <!-- Main Input Area -->
-              <div class="flex-1 min-w-0 h-[26px]">
-                <!-- RGB Inputs -->
-                <div v-if="pickerColorMode === 'RGB'" class="w-full h-full grid grid-cols-3 gap-[2px]">
-                  <input v-for="key in ['r','g','b']" :key="key"
-                    :value="pickerRgba[key as keyof typeof pickerRgba]"
-                    @input="(e: any) => handleRgbaInput(key, (e.target as HTMLInputElement).value)"
-                    class="w-full h-full bg-black/20 border border-white/5 rounded text-[10px] text-center outline-none focus:bg-black/30 text-white/90"
+              <!-- Bottom Row: Mode & Inputs -->
+              <div class="flex gap-1 items-center px-0.5 mt-0.5 relative">
+                <!-- Mode Select -->
+                <div class="w-[52px] shrink-0 h-[26px] relative">
+                  <button 
+                    @click.stop="cycleColorMode"
+                    class="w-full h-full px-1 bg-black/20 hover:bg-black/40 rounded text-[10px] font-medium transition-all flex items-center justify-between gap-0.5 border border-white/5"
+                  >
+                    <span class="truncate">{{ pickerColorMode }}</span>
+                    <ChevronDown :size="10" class="shrink-0 opacity-40" />
+                  </button>
+                  
+                  <!-- Dropdown Menu -->
+                  <div v-if="isColorModeDropdownOpen" class="absolute bottom-full left-0 mb-1 w-[70px] bg-[#333] border border-[#444] rounded shadow-xl z-50 overflow-hidden">
+                    <div 
+                      v-for="mode in (['RGB', 'Hex', 'CSS'] as const)" 
+                      :key="mode"
+                      @click="pickerColorMode = mode; isColorModeDropdownOpen = false"
+                      class="px-2 py-1.5 text-[10px] hover:bg-figma-accent hover:text-white cursor-pointer transition-colors"
+                      :class="{ 'text-figma-accent font-bold': pickerColorMode === mode }"
+                    >
+                      {{ mode }}
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Main Input Area -->
+                <div class="flex-1 min-w-0 h-[26px]">
+                  <!-- RGB Inputs -->
+                  <div v-if="pickerColorMode === 'RGB'" class="w-full h-full grid grid-cols-3 gap-[2px]">
+                    <input v-for="key in ['r','g','b']" :key="key"
+                      :value="pickerRgba[key as keyof typeof pickerRgba]"
+                      @input="(e: any) => handleRgbaInput(key, (e.target as HTMLInputElement).value)"
+                      class="w-full h-full bg-black/20 border border-white/5 rounded text-[10px] text-center outline-none focus:bg-black/30 text-white/90"
+                    />
+                  </div>
+
+                  <!-- Hex Input -->
+                  <input 
+                    v-else-if="pickerColorMode === 'Hex'"
+                    v-model="pickerHex"
+                    class="w-full h-full bg-black/20 border border-white/5 rounded px-2 text-[10px] outline-none focus:bg-black/30 font-mono uppercase text-white/90"
+                  />
+
+                  <!-- CSS Input -->
+                  <input 
+                    v-else
+                    :value="`rgb(${pickerRgba.r} ${pickerRgba.g} ${pickerRgba.b}${pickerRgba.a < 1 ? ' / ' + pickerRgba.a.toFixed(2) : ''})`"
+                    readonly
+                    class="w-full h-full bg-black/20 border border-white/5 rounded px-2 text-[9px] outline-none opacity-60 font-mono text-white/80"
                   />
                 </div>
 
-                <!-- Hex Input -->
-                <input 
-                  v-else-if="pickerColorMode === 'Hex'"
-                  v-model="pickerHex"
-                  class="w-full h-full bg-black/20 border border-white/5 rounded px-2 text-[10px] outline-none focus:bg-black/30 font-mono uppercase text-white/90"
-                />
+                <!-- Alpha % (Hidden in CSS mode) -->
+                <div v-if="pickerColorMode !== 'CSS'" class="w-[60px] shrink-0 flex items-center gap-0 h-[24px] px-1 bg-black/20 border border-white/5 rounded">
+                  <input 
+                    :value="Math.round(pickerRgba.a * 100)"
+                    @input="(e: any) => handleAlphaInputRelative((e.target as HTMLInputElement).value)"
+                    class="w-full bg-transparent text-[10px] text-center outline-none text-white/90 p-0"
+                  />
+                  <span class="text-[9px] opacity-20 select-none">%</span>
+                </div>
+              </div>
+            </template>
 
-                <!-- CSS Input -->
+            <!-- Text / Number Input Area -->
+            <template v-else>
+              <div>
+                <div class="text-[10px] text-white/40 font-medium px-0.5">Value</div>
                 <input 
-                  v-else
-                  :value="`rgb(${pickerRgba.r} ${pickerRgba.g} ${pickerRgba.b}${pickerRgba.a < 1 ? ' / ' + pickerRgba.a.toFixed(2) : ''})`"
-                  readonly
-                  class="w-full h-full bg-black/20 border border-white/5 rounded px-2 text-[9px] outline-none opacity-60 font-mono text-white/80"
+                  v-model="pickerInputValue" 
+                  @input="handleValueInput(pickerInputValue)"
+                  class="w-full bg-black/20 border border-white/10 rounded px-2 py-2 text-[11px] outline-none text-white/80 focus:border-figma-accent transition-colors"
+                  :placeholder="pickerTarget?.type === 'FLOAT' ? '0' : 'Value text'"
                 />
               </div>
+            </template>
 
-              <!-- Alpha % (Hidden in CSS mode) -->
-              <div v-if="pickerColorMode !== 'CSS'" class="w-[60px] shrink-0 flex items-center gap-0 h-[24px] px-1 bg-black/20 border border-white/5 rounded">
-                <input 
-                  :value="Math.round(pickerRgba.a * 100)"
-                  @input="(e: any) => handleAlphaInputRelative((e.target as HTMLInputElement).value)"
-                  class="w-full bg-transparent text-[10px] text-center outline-none text-white/90 p-0"
-                />
-                <span class="text-[9px] opacity-20 select-none">%</span>
-              </div>
-            </div>
+
 
             <!-- Variable Info Toggle Section -->
             <div class="pt-1 mt-2 border-t border-white/5">
@@ -1816,7 +1886,7 @@ watch(activeCollection, (newCol) => {
                     >
                       <ChevronDown v-if="!collapsedLibraryGroups.has(groupFullName as string)" :size="10" class="text-white/20 group-hover/header:text-white/40 transition-transform" />
                       <ChevronRight v-else :size="10" class="text-white/20 group-hover/header:text-white/40 transition-transform" />
-                      <div class="text-[9px] text-white/30 group-hover/header:text-white/50 transition-colors uppercase tracking-tight">{{ groupFullName }}</div>
+                      <div class="text-[9px] text-white/30 group-hover/header:text-white/50 transition-colors">{{ groupFullName }}</div>
                       <div class="h-[1px] flex-1 bg-white/5 ml-2"></div>
                       <span class="text-[9px] opacity-10 font-mono">{{ vars.length }}</span>
                     </div>
@@ -1827,6 +1897,7 @@ watch(activeCollection, (newCol) => {
                         v-for="v in vars" :key="v.id"
                         @click="setVariableAlias(v.id)"
                         @mouseenter="handleVariableHover($event, v)"
+                        @mousemove="handleMouseMove"
                         @mouseleave="handleVariableHover(null, null)"
                         class="aspect-square rounded-md shadow-sm transition-all duration-300 relative group/griditem overflow-visible"
                         :class="pickerTarget?.id === v.id ? 'cursor-not-allowed grayscale-[0.8] opacity-40' : 'cursor-pointer'"
@@ -1856,7 +1927,7 @@ watch(activeCollection, (newCol) => {
                     >
                       <ChevronDown v-if="!collapsedLibraryGroups.has(groupFullName as string)" :size="10" class="text-white/20 group-hover/header:text-white/40 transition-transform" />
                       <ChevronRight v-else :size="10" class="text-white/20 group-hover/header:text-white/40 transition-transform" />
-                      <div class="text-[9px] text-white/30 group-hover/header:text-white/50 transition-colors uppercase tracking-tight">{{ groupFullName }}</div>
+                      <div class="text-[9px] text-white/30 group-hover/header:text-white/50 transition-colors">{{ groupFullName }}</div>
                       <div class="h-[1px] flex-1 bg-white/5 ml-2"></div>
                       <span class="text-[9px] opacity-10 font-mono">{{ vars.length }}</span>
                     </div>
@@ -1866,6 +1937,7 @@ watch(activeCollection, (newCol) => {
                         v-for="v in vars" :key="v.id"
                         @click="setVariableAlias(v.id)"
                         @mouseenter="handleVariableHover($event, v)"
+                        @mousemove="handleMouseMove"
                         @mouseleave="handleVariableHover(null, null)"
                         class="flex items-center gap-2.5 h-[28px] px-4 rounded-lg transition-all relative overflow-hidden"
                         :class="[
@@ -1893,12 +1965,12 @@ watch(activeCollection, (newCol) => {
     <!-- Variable Tooltip (Detailed Box Style) -->
     <transition name="tooltip-box">
       <div 
-        v-if="hoveredVariable && varHoveredRect" 
+        v-if="hoveredVariable && mousePos.x" 
         class="fixed p-2.5 bg-[#1E1E1E] text-white rounded-lg shadow-[0_12px_32px_rgba(0,0,0,0.8)] z-[99999] pointer-events-none border border-white/10 flex flex-col gap-2 min-w-[140px] max-w-[200px]"
         :style="{ 
-          top: (varHoveredRect.top - 8) + 'px', 
-          left: (varHoveredRect.left + varHoveredRect.width / 2) + 'px',
-          transform: 'translateX(-50%) translateY(-100%)' 
+          top: tooltipPlacement === 'top' ? (mousePos.y - 12) + 'px' : (mousePos.y + 12) + 'px', 
+          left: mousePos.x + 'px',
+          transform: tooltipPlacement === 'top' ? 'translateX(-50%) translateY(-100%)' : 'translateX(-50%)' 
         }"
       >
         <!-- Name -->
@@ -1925,12 +1997,19 @@ watch(activeCollection, (newCol) => {
         </div>
 
         <!-- Description -->
-        <div v-if="hoveredVariable.description" class="text-[9px] text-white/40 leading-relaxed italic break-words">
+        <div v-if="hoveredVariable.description" class="text-[9px] text-white/40 leading-relaxed break-words">
           {{ hoveredVariable.description }}
         </div>
         
         <!-- Arrow -->
-        <div class="absolute top-[calc(100%-1px)] left-1/2 -translate-x-1/2 w-0 h-0 border-l-[6px] border-l-transparent border-r-[6px] border-r-transparent border-t-[6px] border-t-[#1E1E1E]"></div>
+        <div 
+          v-if="tooltipPlacement === 'top'"
+          class="absolute top-[calc(100%-1px)] left-1/2 -translate-x-1/2 w-0 h-0 border-l-[6px] border-l-transparent border-r-[6px] border-r-transparent border-t-[6px] border-t-[#1E1E1E]"
+        ></div>
+        <div 
+          v-else
+          class="absolute bottom-[calc(100%-1px)] left-1/2 -translate-x-1/2 w-0 h-0 border-l-[6px] border-l-transparent border-r-[6px] border-r-transparent border-b-[6px] border-b-[#1E1E1E]"
+        ></div>
       </div>
     </transition>
   </div>
@@ -1941,7 +2020,7 @@ watch(activeCollection, (newCol) => {
 .toast-enter-from, .toast-leave-to { opacity: 0; transform: translate(-50%, 10px); }
 
 .tooltip-box-enter-active, .tooltip-box-leave-active { transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1); }
-.tooltip-box-enter-from, .tooltip-box-leave-to { opacity: 0; transform: translateX(-50%) translateY(-100%) scale(0.95); }
+.tooltip-box-enter-from, .tooltip-box-leave-to { opacity: 0; scale: 0.95; }
 
 .custom-scrollbar::-webkit-scrollbar { width: 8px; }
 .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
