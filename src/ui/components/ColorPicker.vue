@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue';
+import { ref, computed, watch } from 'vue';
 import { 
   X, 
   Pipette, 
@@ -24,6 +24,8 @@ interface Props {
   allVariables: any[];
   isDuplicateName: boolean;
   collections: any[];
+  activeMode: string | null;
+  initialTab?: 'Custom' | 'Libraries';
 }
 
 const props = defineProps<Props>();
@@ -50,7 +52,14 @@ const {
 } = useColorConversion();
 
 // --- Local State ---
-const pickerTab = ref<'Custom' | 'Libraries'>('Custom');
+const pickerTab = ref<'Custom' | 'Libraries'>(props.initialTab || 'Custom');
+
+// 當彈窗開啟時，根據 initialTab 設置標籤頁
+watch(() => props.visible, (newVisible) => {
+  if (newVisible && props.initialTab) {
+    pickerTab.value = props.initialTab;
+  }
+});
 const pickerColorMode = ref<'Hex' | 'RGB' | 'CSS'>('Hex');
 const isColorModeDropdownOpen = ref(false);
 const isVariableInfoExpanded = ref(false);
@@ -100,11 +109,14 @@ function hexToRgbaLocal(hex: string) {
 const filteredLibraries = computed(() => {
   let result: any[] = [];
   props.collections.forEach(col => {
-    col.variables.forEach((v: any) => {
-      if (v.type === 'COLOR') {
+    (col.variables || []).forEach((v: any) => {
+      // 大小寫不敏感比較，支援 'COLOR' 和 'Color' 兩種格式
+      if (v.type?.toUpperCase() === 'COLOR') {
+        const modeVal = v.values?.find((m: any) => m.modeId === props.activeMode) || v.values?.[0];
+        const colorValue = modeVal?.value || '';
         const q = librarySearchQuery.value.toLowerCase();
         if (!q || v.name.toLowerCase().includes(q) || col.collectionName.toLowerCase().includes(q)) {
-          result.push({ ...v, collectionName: col.collectionName });
+          result.push({ ...v, collectionName: col.collectionName, colorValue });
         }
       }
     });
@@ -287,7 +299,7 @@ const internalTarget = computed({
         </div>
 
         <template v-if="pickerTab === 'Custom'">
-          <template v-if="target?.type === 'COLOR'">
+          <template v-if="target?.type?.toUpperCase() === 'COLOR'">
             <!-- Color Display / Alias -->
             <div class="px-0.5 mt-1">
               <div v-if="target?.alias" class="flex items-center justify-between bg-white/[0.04] p-1 rounded-md border border-white/[0.06] group/alias">
@@ -419,7 +431,7 @@ const internalTarget = computed({
                 :value="target?.initialValue" 
                 @input="(e: any) => $emit('value-input', e.target.value)"
                 class="w-full bg-black/20 border border-white/10 rounded px-2 py-2 text-[11px] outline-none text-white/80 focus:border-figma-accent transition-colors"
-                :placeholder="target?.type === 'FLOAT' ? '0' : 'Value text'"
+                :placeholder="target?.type?.toUpperCase() === 'FLOAT' ? '0' : 'Value text'"
               />
             </div>
           </template>

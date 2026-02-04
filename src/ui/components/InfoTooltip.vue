@@ -16,7 +16,7 @@ const colorValue = computed(() => {
   if (props.variable.colorValue) return props.variable.colorValue;
   
   const modeVal = props.variable.values?.find((m: any) => m.modeId === props.activeMode) || props.variable.values?.[0];
-  const val = modeVal.value || '#000000';
+  const val = modeVal?.value || '#000000';
   return typeof val === 'string' ? val.toUpperCase() : String(val);
 });
 
@@ -28,7 +28,7 @@ const aliasName = computed(() => {
 
 const displayType = computed(() => {
   if (!props.variable) return '';
-  switch (props.variable.type) {
+  switch (props.variable.type?.toUpperCase()) {
     case 'FLOAT': return 'Number';
     case 'COLOR': return 'Color';
     case 'STRING': return 'String';
@@ -37,11 +37,52 @@ const displayType = computed(() => {
   }
 });
 
-const tooltipStyle = computed(() => ({
-  top: props.placement === 'top' ? (props.mousePos.y - 12) + 'px' : (props.mousePos.y + 12) + 'px', 
-  left: props.mousePos.x + 'px',
-  transform: props.placement === 'top' ? 'translateX(-50%) translateY(-100%)' : 'translateX(-50%)' 
-}));
+const tooltipPosition = computed(() => {
+  const tooltipWidth = 240; // tooltip 的大約寬度
+  const tooltipHeight = 150; // tooltip 的大約高度
+  const padding = 10; // 與邊界的安全距離
+  
+  let finalPlacement: 'top' | 'bottom' = props.placement;
+  let top = finalPlacement === 'top' ? (props.mousePos.y - 12) : (props.mousePos.y + 12);
+  let left = props.mousePos.x;
+  let transform = finalPlacement === 'top' ? 'translateX(-50%) translateY(-100%)' : 'translateX(-50%)';
+  
+  // 水平邊界檢測
+  const halfWidth = tooltipWidth / 2;
+  if (left - halfWidth < padding) {
+    // 太靠左，改為左對齊
+    left = padding;
+    transform = props.placement === 'top' ? 'translateY(-100%)' : '';
+  } else if (left + halfWidth > window.innerWidth - padding) {
+    // 太靠右，改為右對齊
+    left = window.innerWidth - padding;
+    transform = props.placement === 'top' ? 'translateX(-100%) translateY(-100%)' : 'translateX(-100%)';
+  }
+  
+  // 垂直邊界檢測
+  if (finalPlacement === 'top' && top - tooltipHeight < padding) {
+    // 上方空間不足，改為下方顯示
+    top = props.mousePos.y + 12;
+    transform = transform.replace('translateY(-100%)', '');
+    finalPlacement = 'bottom';
+  } else if (finalPlacement === 'bottom' && top + tooltipHeight > window.innerHeight - padding) {
+    // 下方空間不足，改為上方顯示
+    top = props.mousePos.y - 12;
+    if (!transform.includes('translateY')) {
+      transform = transform ? transform + ' translateY(-100%)' : 'translateY(-100%)';
+    }
+    finalPlacement = 'top';
+  }
+  
+  return {
+    style: {
+      top: top + 'px',
+      left: left + 'px',
+      transform
+    },
+    placement: finalPlacement
+  };
+});
 </script>
 
 <template>
@@ -49,7 +90,7 @@ const tooltipStyle = computed(() => ({
     <div 
       v-if="variable && mousePos.x" 
       class="info-tooltip fixed z-[99999] pointer-events-none"
-      :style="tooltipStyle"
+      :style="tooltipPosition.style"
     >
       <div class="glass-container p-3 flex flex-col gap-2.5">
         <!-- Header: Type & Name -->
@@ -69,7 +110,7 @@ const tooltipStyle = computed(() => ({
           <!-- Visual Preview & Value -->
           <div class="flex items-center gap-2 px-2 py-2 bg-white/[0.04] rounded-md border border-white/5 shadow-inner">
             <div 
-              v-if="variable.type === 'Color'"
+              v-if="variable.type?.toUpperCase() === 'COLOR'"
               class="w-5 h-5 rounded-md border border-white/20 shrink-0 shadow-lg relative overflow-hidden checkerboard-bg" 
             >
               <div class="absolute inset-0" :style="{ backgroundColor: colorValue }"></div>
@@ -78,7 +119,7 @@ const tooltipStyle = computed(() => ({
               v-else
               class="w-5 h-5 flex items-center justify-center rounded-md bg-white/5 border border-white/5 text-[10px] font-bold text-white/40 shrink-0 shadow-lg"
             >
-              {{ variable.type === 'Boolean' ? 'TF' : variable.type === 'Number' ? '0.1' : 'Aa' }}
+              {{ variable.type?.toUpperCase() === 'BOOLEAN' ? 'TF' : variable.type?.toUpperCase() === 'FLOAT' ? '0.1' : 'Aa' }}
             </div>
 
             <div class="flex flex-col min-w-0 flex-1 justify-center">
@@ -90,9 +131,9 @@ const tooltipStyle = computed(() => ({
               <div class="flex items-center gap-1.5 min-w-0">
                 <span 
                   class="text-[10px] font-mono text-white/70 tracking-wide leading-none truncate block"
-                  :class="{ 'uppercase': variable.type === 'Color' }"
+                  :class="{ 'uppercase': variable.type?.toUpperCase() === 'COLOR' }"
                 >
-                  {{ variable.type === 'Color' ? colorValue : (variable.values?.find((m: any) => m.modeId === activeMode)?.value || 'N/A') }}
+                  {{ variable.type?.toUpperCase() === 'COLOR' ? colorValue : (variable.values?.find((m: any) => m.modeId === activeMode)?.value || 'N/A') }}
                 </span>
               </div>
             </div>
@@ -100,8 +141,8 @@ const tooltipStyle = computed(() => ({
 
           <!-- Description Section -->
           <div v-if="variable.description" class="px-1.5 py-1">
-            <div class="text-[10px] text-white/50 leading-relaxed break-words font-medium italic">
-              "{{ variable.description }}"
+            <div class="text-[12px] text-figma-accent leading-relaxed break-words font-medium">
+              {{ variable.description }}
             </div>
           </div>
         </div>
@@ -112,7 +153,7 @@ const tooltipStyle = computed(() => ({
 
       <!-- Arrow -->
       <div 
-        v-if="placement === 'top'"
+        v-if="tooltipPosition.placement === 'top'"
         class="tooltip-arrow absolute top-[calc(100%-6px)] left-1/2 -translate-x-1/2 w-3 h-3 bg-[#1e1e1e] rotate-45 border-r border-b border-white/10 -z-10"
       ></div>
       <div 
@@ -125,7 +166,8 @@ const tooltipStyle = computed(() => ({
 
 <style scoped>
 .tooltip-premium-enter-active, .tooltip-premium-leave-active { 
-  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1); 
+  transition: opacity 0.25s cubic-bezier(0.16, 1, 0.3, 1), 
+              transform 0.25s cubic-bezier(0.16, 1, 0.3, 1); 
 }
 .tooltip-premium-enter-from, .tooltip-premium-leave-to { 
   opacity: 0; 

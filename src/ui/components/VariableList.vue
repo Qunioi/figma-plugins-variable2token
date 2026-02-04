@@ -57,7 +57,7 @@ const filteredVariables = computed(() => {
   
   // 類型篩選
   if (props.searchTypeFilter !== 'ALL') {
-    vars = vars.filter((v: any) => v.type === props.searchTypeFilter);
+    vars = vars.filter((v: any) => v.type?.toUpperCase() === props.searchTypeFilter);
   }
   
   // 文字搜尋
@@ -84,7 +84,7 @@ const jsonData = computed(() => {
   if (!props.activeCollection) return {};
   const result: Record<string, any> = {};
   
-  props.activeCollection.variables.forEach((v: any) => {
+  filteredVariables.value.forEach((v: any) => {
     const parts = v.name.split('/');
     let current = result;
     
@@ -204,7 +204,7 @@ const isSyncing = ref(false); // can be removed
               @mouseleave="handleVariableHover(null, null)"
             >
               <!-- Icon / Color Swatch -->
-              <div v-if="v.type === 'Color'" class="relative shrink-0">
+              <div v-if="v.type?.toUpperCase() === 'COLOR'" class="relative shrink-0">
                 <div 
                   class="w-5 h-5 rounded-md border border-figma-border shadow-sm transition-transform hover:scale-110 overflow-hidden cursor-pointer"
                   :style="{ backgroundColor: v.values.find((m:any) => m.modeId === activeMode)?.value || v.values[0]?.value }"
@@ -217,7 +217,7 @@ const isSyncing = ref(false); // can be removed
                 class="w-5 h-5 flex items-center justify-center rounded-md bg-white/5 border border-figma-border text-[9px] font-bold opacity-60 shrink-0 cursor-pointer hover:bg-white/10"
                 @click.stop="openPicker($event, v)"
               >
-                {{ v.type === 'Boolean' ? 'B' : v.type === 'Number' ? '#' : 'T' }}
+                {{ v.type?.toUpperCase() === 'BOOLEAN' ? 'B' : v.type?.toUpperCase() === 'FLOAT' ? '#' : 'T' }}
               </div>
 
               <!-- Name -->
@@ -268,8 +268,8 @@ const isSyncing = ref(false); // can be removed
               class="flex flex-col gap-1.5 group/card cursor-pointer"
             >
               <div class="aspect-square rounded-lg bg-white/5 border border-white/5 flex items-center justify-center relative overflow-hidden transition-all duration-300 group-hover/card:border-white/20 group-hover/card:scale-105 group-hover/card:shadow-xl">
-                <div v-if="v.type === 'Color'" class="absolute inset-0" :style="{ backgroundColor: v.values.find((m:any) => m.modeId === activeMode)?.value || v.values[0]?.value }"></div>
-                <span v-else class="text-xs font-bold opacity-20 group-hover/card:opacity-40">{{ v.type === 'Boolean' ? 'B' : v.type === 'Number' ? '#' : 'T' }}</span>
+                <div v-if="v.type?.toUpperCase() === 'COLOR'" class="absolute inset-0" :style="{ backgroundColor: v.values.find((m:any) => m.modeId === activeMode)?.value || v.values[0]?.value }"></div>
+                <span v-else class="text-xs font-bold opacity-20 group-hover/card:opacity-40">{{ v.type?.toUpperCase() === 'BOOLEAN' ? 'B' : v.type?.toUpperCase() === 'FLOAT' ? '#' : 'T' }}</span>
                 
                 <!-- Hover Overlay -->
                 <div class="absolute inset-0 bg-black/20 opacity-0 group-hover/card:opacity-100 transition-opacity flex items-center justify-center">
@@ -316,6 +316,7 @@ const isSyncing = ref(false); // can be removed
           class="flex-1 overflow-auto custom-scrollbar"
           @mouseleave="clearJsonHover"
           @mousemove="handleJsonMouseMove"
+          @click="handleJsonMouseMove"
         >
           <VueJsonPretty 
             :data="jsonData" 
@@ -367,6 +368,10 @@ const isSyncing = ref(false); // can be removed
 
 :deep(.vjs-indent-unit.has-line) {
   border-left-color: rgb(255 255 255 / 10%) !important;
+}
+
+:deep(.vjs-comment) {
+  color: rgb(255 255 255 / 20%) !important;
 }
 
 :deep(.vjs-key) {

@@ -24,25 +24,25 @@ const emit = defineEmits(['open-github-settings', 'open-push-modal', 'pull']);
 </script>
 
 <template>
-  <footer class="h-10 border-t border-white/5 flex items-center justify-between px-3 bg-[#1A1A1A] select-none shrink-0 z-50">
+  <footer class="h-10 border-t border-white/5 flex items-center justify-between pl-1 pr-3 select-none shrink-0 z-50">
     <!-- Left: Branch & Repo Info -->
-    <div class="flex items-center gap-3">
+    <div class="flex items-center gap-1">
       <div 
         v-if="githubSettings.githubAccount"
-        class="flex items-center gap-2 px-2 py-1 rounded bg-white/[0.03] border border-white/5 hover:border-figma-accent/30 transition-all cursor-pointer group"
+        class="flex items-center gap-1 px-2 py-1 rounded bg-white/[0.03] border border-white/5 hover:border-figma-accent/30 transition-all cursor-pointer group"
         @click="$emit('open-github-settings')"
       >
-        <GitBranch :size="12" class="text-figma-accent" />
-        <span class="text-[11px] font-medium text-white/50 group-hover:text-white/80 transition-colors">
+        <GitBranch :size="10" />
+        <span class="text-[11px] text-white/50 hover:text-figma-accent transition-colors">
           {{ githubSettings.githubBranch || 'main' }}
         </span>
       </div>
       
-      <div class="flex items-center gap-1.5 ml-1">
+      <div class="flex items-center gap-1 ml-1">
         <button 
           v-if="githubSettings.githubAccount"
           @click="$emit('pull')"
-          class="p-1.5 text-white/30 hover:text-white hover:bg-white/5 rounded transition-all"
+          class="p-1.5 text-white/30 hover:text-figma-accent hover:bg-white/5 rounded transition-all"
           title="從 GitHub 下載 (Pull)"
         >
           <Download :size="13" />
@@ -80,9 +80,3 @@ const emit = defineEmits(['open-github-settings', 'open-push-modal', 'pull']);
     </div>
   </footer>
 </template>
-
-<style scoped>
-footer {
-  box-shadow: 0 -2px 10px rgba(0,0,0,0.2);
-}
-</style>

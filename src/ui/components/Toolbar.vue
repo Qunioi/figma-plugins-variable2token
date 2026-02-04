@@ -86,10 +86,10 @@ const setIsSidebarCollapsed = (val: boolean) => {
           :class="searchTypeFilter !== 'ALL' ? 'text-figma-accent border-figma-accent/50' : 'text-white/60'"
         >
           <Layers v-if="searchTypeFilter === 'ALL'" :size="14" />
-          <Palette v-else-if="searchTypeFilter === 'Color'" :size="14" />
-          <Hash v-else-if="searchTypeFilter === 'Number'" :size="14" />
-          <Type v-else-if="searchTypeFilter === 'String'" :size="14" />
-          <ToggleLeft v-else-if="searchTypeFilter === 'Boolean'" :size="14" />
+          <Palette v-else-if="searchTypeFilter === 'COLOR'" :size="14" />
+          <Hash v-else-if="searchTypeFilter === 'FLOAT'" :size="14" />
+          <Type v-else-if="searchTypeFilter === 'STRING'" :size="14" />
+          <ToggleLeft v-else-if="searchTypeFilter === 'BOOLEAN'" :size="14" />
           <span class="flex-1 text-left">{{ typeFilterOptions.find(t => t.value === searchTypeFilter)?.label }}</span>
           <ChevronDown :size="10" />
         </button>
@@ -114,10 +114,10 @@ const setIsSidebarCollapsed = (val: boolean) => {
             :class="searchTypeFilter === opt.value ? 'text-figma-accent font-medium' : 'text-white/70'"
           >
             <Layers v-if="opt.value === 'ALL'" :size="14" />
-            <Palette v-else-if="opt.value === 'Color'" :size="14" />
-            <Hash v-else-if="opt.value === 'Number'" :size="14" />
-            <Type v-else-if="opt.value === 'String'" :size="14" />
-            <ToggleLeft v-else-if="opt.value === 'Boolean'" :size="14" />
+            <Palette v-else-if="opt.value === 'COLOR'" :size="14" />
+            <Hash v-else-if="opt.value === 'FLOAT'" :size="14" />
+            <Type v-else-if="opt.value === 'STRING'" :size="14" />
+            <ToggleLeft v-else-if="opt.value === 'BOOLEAN'" :size="14" />
             <span class="flex-1">{{ opt.label }}</span>
             <Check v-if="searchTypeFilter === opt.value" :size="12" />
           </div>

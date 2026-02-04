@@ -46,6 +46,7 @@ const demoFiles = import.meta.glob('../demo/**/*.tokens.json', { eager: true });
 
 // --- Custom Color Picker Internal State ---
 const pickerVisible = ref(false);
+const pickerInitialTab = ref<'Custom' | 'Libraries'>('Custom');
 const pickerPos = ref({ top: 0, left: 0 });
 const pickerTarget = ref<{
   id: string, 
@@ -57,6 +58,7 @@ const pickerTarget = ref<{
   originalName: string,      // 視窗開啟時的原始名稱
   originalValue: string,     // 視窗開啟時的原始值
   originalDescription: string, // 視窗開啟時的原始描述
+  originalAlias?: { id: string, name: string } | null, // 視窗開啟時的原始 alias
   alias?: { id: string, name: string }
 } | null>(null);
 const pickerHsv = ref({ h: 0, s: 0, v: 0, a: 1 });
@@ -65,13 +67,13 @@ const collections = ref<any[]>([]);
 const activeIndex = ref(0);
 const activeMode = ref<string | null>(null);
 const searchQuery = ref('');
-const searchTypeFilter = ref<'ALL' | 'Color' | 'Number' | 'String' | 'Boolean'>('ALL');
+const searchTypeFilter = ref<'ALL' | 'COLOR' | 'FLOAT' | 'STRING' | 'BOOLEAN'>('ALL');
 const typeFilterOptions: TypeFilterOption[] = [
   { value: 'ALL', label: 'All', icon: null },
-  { value: 'Color', label: 'Colors', icon: '🎨' },
-  { value: 'Number', label: 'Numbers', icon: '#' },
-  { value: 'String', label: 'Strings', icon: 'T' },
-  { value: 'Boolean', label: 'Booleans', icon: 'B' },
+  { value: 'COLOR', label: 'Colors', icon: '🎨' },
+  { value: 'FLOAT', label: 'Numbers', icon: '#' },
+  { value: 'STRING', label: 'Strings', icon: 'T' },
+  { value: 'BOOLEAN', label: 'Booleans', icon: 'B' },
 ];
 
 const pickerInputName = ref('');
@@ -109,7 +111,7 @@ const allVariables = computed(() => {
   const vars: any[] = [];
   collections.value.forEach(col => {
     col.variables.forEach((v: any) => {
-      if (v.type === 'COLOR') vars.push(v);
+      if (v.type?.toUpperCase() === 'COLOR') vars.push(v);
     });
   });
   return vars;
@@ -149,8 +151,9 @@ const openPicker = (e: MouseEvent, v: any) => {
   let currentVal = modeVal?.value;
   let aliasInfo = modeVal?.alias || undefined;
 
-  // 只有 Color 類型才需要處理 hex 格式
-  if (v.type === 'Color') {
+  const isColorType = v.type?.toUpperCase() === 'COLOR';
+  // 只有 COLOR 類型才需要處理 hex 格式
+  if (isColorType) {
     if (isAlias && aliasInfo) {
       currentVal = modeVal.value;
     } else {
@@ -164,13 +167,14 @@ const openPicker = (e: MouseEvent, v: any) => {
   pickerTarget.value = { 
     id: v.id, 
     name: v.name.split('/').pop() || '', 
-    type: v.type,
+    type: v.type?.toUpperCase() || v.type,
     initialName: v.name.split('/').pop() || '',
-    initialValue: v.type === 'Color' ? currentVal : String(currentVal),
+    initialValue: isColorType ? currentVal : String(currentVal),
     initialDescription: v.description || "",
     originalName: v.name.split('/').pop() || '',
-    originalValue: v.type === 'Color' ? currentVal : String(currentVal),
+    originalValue: isColorType ? currentVal : String(currentVal),
     originalDescription: v.description || "",
+    originalAlias: aliasInfo || null, // 記錄開啟時的原始 alias
     alias: aliasInfo
   };
   pickerInputName.value = pickerTarget.value.name;
@@ -183,36 +187,56 @@ const openPicker = (e: MouseEvent, v: any) => {
   
   // Position calculation
   const pickerWidth = 260;
-  const pickerHeight = v.type === 'Color' ? 400 : 180;
+  const pickerHeight = isColorType ? 400 : 180;
   
   let top = 100;
   let left = window.innerWidth / 2 - pickerWidth / 2;
+  let clickY = 0;
+  let clickX = 0;
   
   if (e && e.currentTarget) {
     const clickedElement = e.currentTarget as HTMLElement;
     const rowElement = clickedElement.closest('.flex.items-center.gap-3') as HTMLElement || clickedElement;
     const rect = rowElement.getBoundingClientRect();
-    top = rect.bottom + 4;
-    left = rect.left;
+    clickY = rect.bottom;
+    clickX = rect.left;
   } else if (e && (e.clientX || e.clientY)) {
-    top = e.clientY + 10;
-    left = e.clientX - pickerWidth / 2;
+    clickY = e.clientY;
+    clickX = e.clientX;
   } else {
     // Fallback to current mouse position
-    top = mousePos.value.y + 10;
-    left = mousePos.value.x - pickerWidth / 2;
+    clickY = mousePos.value.y;
+    clickX = mousePos.value.x;
   }
   
-  if (top + pickerHeight > window.innerHeight) {
-    top = Math.max(10, top - pickerHeight - 20);
+  // 優先顯示在點擊位置下方
+  top = clickY + 10;
+  left = clickX - pickerWidth / 2;
+  
+  // 檢查是否超出底部，如果是則顯示在點擊位置上方
+  if (top + pickerHeight > window.innerHeight - 10) {
+    top = clickY - pickerHeight - 10;
+    // 確保不會超出頂部
+    if (top < 10) {
+      top = 10;
+    }
   }
 
-  if (left + pickerWidth > window.innerWidth) {
+  // 檢查左右邊界
+  if (left + pickerWidth > window.innerWidth - 10) {
     left = window.innerWidth - pickerWidth - 10;
   }
-  left = Math.max(10, left);
+  if (left < 10) {
+    left = 10;
+  }
   
   pickerPos.value = { top, left };
+  
+  // 根據變數是否為連結變數（alias）決定初始標籤頁
+  // - 有 alias → Libraries 標籤
+  // - 純色碼 → Custom 標籤
+  pickerInitialTab.value = pickerTarget.value?.alias ? 'Libraries' : 'Custom';
+  pickerVisible.value = true;
 };
 const handleUpdateTarget = (newTarget: any) => {
   pickerTarget.value = newTarget;
@@ -223,7 +247,7 @@ const handleUpdateTarget = (newTarget: any) => {
 };
 
 const updateFromPicker = () => {
-  if (!pickerTarget.value || pickerTarget.value.type !== 'Color') return;
+  if (!pickerTarget.value || pickerTarget.value.type?.toUpperCase() !== 'COLOR') return;
   const rgba = hsvaToRgba(pickerHsv.value);
   const hex = rgbaToHex8(rgba); // 使用 hex8 以支援透明度
   
@@ -233,7 +257,7 @@ const updateFromPicker = () => {
 
 // 增加監聽，確保選色器操作能反映在本地 state
 watch(pickerHsv, () => {
-  if (pickerVisible.value && pickerTarget.value?.type === 'Color') {
+  if (pickerVisible.value && pickerTarget.value?.type?.toUpperCase() === 'COLOR') {
     updateFromPicker();
   }
 }, { deep: true });
@@ -334,16 +358,7 @@ const setVariableAlias = (targetId: string) => {
     // 邏輯上不能點擊自己 (Self-reference)
     if (targetId === pickerTarget.value.id) return;
 
-    parent.postMessage({ 
-      pluginMessage: { 
-        type: 'set-variable-alias', 
-        variableId: pickerTarget.value.id, 
-        modeId: activeMode.value, 
-        targetVariableId: targetId 
-      } 
-    }, '*');
-    
-    // 即時更新 UI
+    // 只更新本地 UI，不立即發送到 Figma
     const targetVar = allVariables.value.find(av => av.id === targetId);
     if (targetVar) {
       pickerTarget.value.alias = { id: targetId, name: targetVar.name.split('/').pop() || targetVar.name };
@@ -353,6 +368,8 @@ const setVariableAlias = (targetId: string) => {
         const rgba = hexToRgba(aliasColor);
         pickerHsv.value = rgbaToHsva(rgba);
       }
+      
+      showToastWithTimer(`Linked to ${targetVar.name}`);
     }
   }
 };
@@ -360,22 +377,14 @@ const setVariableAlias = (targetId: string) => {
 const detachVariableAlias = () => {
   if (pickerTarget.value && activeMode.value) {
     const currentColor = pickerTarget.value.initialValue;
-    // 將連結斷開，並套用當前的色碼
-    parent.postMessage({ 
-      pluginMessage: { 
-        type: 'update-variable', 
-        variableId: pickerTarget.value.id, 
-        modeId: activeMode.value,
-        newValue: currentColor,
-        varType: 'COLOR'
-      } 
-    }, '*');
-
+    
+    // 只更新本地 UI，不立即發送到 Figma
     pickerTarget.value.alias = undefined;
     if (currentColor) {
       const rgba = hexToRgba(currentColor);
       pickerHsv.value = rgbaToHsva(rgba);
     }
+    
     showToastWithTimer('Variable detached and color preserved');
   }
 };
@@ -432,11 +441,17 @@ const closePicker = () => {
     const nameChanged = pickerInputName.value !== pickerTarget.value.originalName;
     const descChanged = pickerDescription.value !== pickerTarget.value.originalDescription;
     
+    // 檢查 alias 是否變更
+    const originalAlias = pickerTarget.value.originalAlias;
+    const currentAlias = pickerTarget.value.alias;
+    const aliasChanged = (originalAlias?.id !== currentAlias?.id);
+    
     // 比較最終值與開啟時的原始值
     let valueChanged = false;
     let finalValue: any;
 
-    if (pickerTarget.value.type === 'Color') {
+     const isColorType = pickerTarget.value.type?.toUpperCase() === 'COLOR';
+     if (isColorType) {
        // 顏色類型：從選色器的 HSV 值計算最終顏色
        const rgba = hsvaToRgba(pickerHsv.value);
        finalValue = rgbaToHex8(rgba).toUpperCase();
@@ -447,22 +462,47 @@ const closePicker = () => {
        valueChanged = finalValue !== pickerTarget.value.originalValue;
     }
     
-    if (nameChanged || valueChanged || descChanged) {
+    if (nameChanged || valueChanged || descChanged || aliasChanged) {
        // 1. 建立 Undo 紀錄（使用最原始的值）
        setLastChange({ 
          variableId: pickerTarget.value.id, 
          modeId: activeMode.value!, 
-         oldValue: valueChanged ? pickerTarget.value.originalValue : undefined,
+         oldValue: (valueChanged || aliasChanged) ? pickerTarget.value.originalValue : undefined,
          oldName: nameChanged ? pickerTarget.value.originalName : undefined,
          oldDescription: descChanged ? pickerTarget.value.originalDescription : undefined,
-         varType: pickerTarget.value.type, 
+         oldAlias: aliasChanged ? originalAlias : undefined,
+         varType: pickerTarget.value.type?.toUpperCase() || pickerTarget.value.type, 
          label: pickerInputName.value 
        });
 
        // 2. 送出所有變更至 Figma
-       if (valueChanged) {
-         // 這裡呼叫 updateVariable 並帶入 silent=true 避免重複跳通知
-         updateVariable(pickerTarget.value.id, finalValue, pickerTarget.value.type, undefined, undefined, true);
+       if (aliasChanged) {
+         // Alias 變更處理
+         if (currentAlias) {
+           // 設置新的 alias 連結
+           parent.postMessage({
+             pluginMessage: {
+               type: 'set-variable-alias',
+               variableId: pickerTarget.value.id,
+               modeId: activeMode.value,
+               targetVariableId: currentAlias.id
+             }
+           }, '*');
+         } else {
+           // 切斷 alias，恢復純色值
+           parent.postMessage({
+             pluginMessage: {
+               type: 'update-variable',
+               variableId: pickerTarget.value.id,
+               modeId: activeMode.value,
+               newValue: finalValue,
+               varType: pickerTarget.value.type?.toUpperCase() || pickerTarget.value.type
+             }
+           }, '*');
+         }
+       } else if (valueChanged) {
+         // 只有純色值變更（沒有 alias 變更）
+         updateVariable(pickerTarget.value.id, finalValue, pickerTarget.value.type?.toUpperCase() || pickerTarget.value.type, undefined, undefined, true);
        }
 
        if (nameChanged) {
@@ -755,13 +795,44 @@ const findVariableByPath = (path: string): any | null => {
 };
 
 // 處理 JSON node 點擊 - vue-json-pretty 的 nodeClick 事件
-const handleJsonNodeClick = (node: any, pathFromArgs: string, e: MouseEvent) => {
+const handleJsonNodeClick = (node: any, pathFromArgs: string, e?: MouseEvent) => {
+  // vue-json-pretty 可能不傳遞事件對象，我們使用 node 信息來判斷
   const path = (typeof node === 'string' ? node : node?.path) || pathFromArgs || '';
-  const pathParts = path.split('.').filter((p: string) => p !== 'root' && p !== 'value' && p !== 'type');
   
-  const variable = findVariableByPath(pathParts.join('.'));
+  // 分割路徑並處理
+  let pathParts = path.split('.');
   
-  if (variable) {
+  // 移除開頭的 'root'
+  if (pathParts[0] === 'root') {
+    pathParts = pathParts.slice(1);
+  }
+  
+  // 檢查這是否是點擊 value（我們只在點擊 value 時開啟編輯器）
+  const isClickingValue = pathParts.length > 0 && pathParts[pathParts.length - 1] === 'value';
+  
+  // 移除結尾的 'value' 或 'type'（這些是屬性，不是路徑的一部分）
+  if (pathParts.length > 0) {
+    const lastPart = pathParts[pathParts.length - 1];
+    if (lastPart === 'value' || lastPart === 'type') {
+      pathParts = pathParts.slice(0, -1);
+    }
+  }
+  
+  // 如果路徑為空，說明點擊的是根節點或無效節點
+  if (pathParts.length === 0) {
+    return;
+  }
+  
+  // 只有在點擊 value 時才繼續處理
+  if (!isClickingValue) {
+    return;
+  }
+  
+  const variablePath = pathParts.join('.');
+  const variable = findVariableByPath(variablePath);
+  
+  // 只有找到變數且該變數有 values 屬性（是實際的變數，不是父節點）時才開啟編輯器
+  if (variable && variable.values) {
     // 清除 hover 狀態
     if (hoverTimer.value) {
       clearTimeout(hoverTimer.value);
@@ -769,8 +840,16 @@ const handleJsonNodeClick = (node: any, pathFromArgs: string, e: MouseEvent) => 
     }
     hoveredVariable.value = null;
     
+    // 如果沒有事件對象，創建一個模擬的事件對象使用當前鼠標位置
+    const mockEvent = e || {
+      clientX: mousePos.value.x,
+      clientY: mousePos.value.y,
+      target: null,
+      currentTarget: null
+    } as any;
+    
     // 開啟編輯器
-    openPicker(e, variable);
+    openPicker(mockEvent, variable);
   }
 };
 
@@ -840,15 +919,16 @@ const toggleSidebarFolder = (name: string) => {
   }
 };
 
-const mapFigmaType = (type: string): VariableType => {
-  switch (type) {
-    case 'COLOR': return 'Color';
-    case 'FLOAT': return 'Number';
-    case 'STRING': return 'String';
-    case 'BOOLEAN': return 'Boolean';
-    default: return type as VariableType;
+const normalizeVariableType = (type: string): VariableType => {
+  const upper = (type || '').toUpperCase();
+  if (upper === 'NUMBER') return 'FLOAT';
+  if (upper === 'COLOR' || upper === 'FLOAT' || upper === 'STRING' || upper === 'BOOLEAN') {
+    return upper as VariableType;
   }
+  return upper as VariableType;
 };
+
+const mapFigmaType = (type: string): VariableType => normalizeVariableType(type);
 
 // --- Lifecycle ---
 const isInitialLoading = ref(true);
@@ -915,7 +995,7 @@ onMounted(() => {
               variableMap[currentPath] = {
                 id: (val as any).$extensions?.['com.figma.variableId'] || currentPath,
                 name: currentPath,
-                type: (val as any).$type?.toUpperCase() || 'STRING',
+                type: normalizeVariableType((val as any).$type || 'STRING'),
                 values: []
               };
             }
@@ -1067,7 +1147,7 @@ const syncPushToGithub = async (pushData: { message: string, branch: string, tas
 </script>
 
 <template>
-  <div class="flex flex-col h-screen overflow-hidden bg-figma-bg text-figma-text select-none">
+  <div class="flex flex-col h-screen overflow-hidden bg-figma-bg text-figma-accent select-none">
     <div class="flex flex-1 overflow-hidden">
       <!-- Sidebar -->
       <Sidebar 
@@ -1174,6 +1254,8 @@ const syncPushToGithub = async (pushData: { message: string, branch: string, tas
       :all-variables="allVariables"
       :is-duplicate-name="isDuplicateName"
       :collections="collections"
+      :active-mode="activeMode"
+      :initial-tab="pickerInitialTab"
       @close="closePicker"
       @update:target="handleUpdateTarget"
       @rename="handleRename"

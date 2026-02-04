@@ -96,7 +96,7 @@ const setSidebarCollapsed = (val: boolean) => {
     :style="{ width: sidebarWidth + 'px' }"
   >
     <div class="flex items-center justify-between h-11 px-3 border-b border-figma-border">
-      <span class="text-[11px] text-figma-text/60">Collections</span>
+      <span class="text-[11px] text-figma-accent/60">Collections</span>
       <button @click="setSidebarCollapsed(true)" class="p-1 hover:bg-white/10 rounded transition-colors text-white/40 hover:text-white">
         <PanelLeftClose :size="14" />
       </button>
