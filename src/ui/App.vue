@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, watch } from 'vue';
+import VueJsonPretty from 'vue-json-pretty';
+import 'vue-json-pretty/lib/styles.css';
 import { 
   RefreshCcw, 
   ChevronDown, 
@@ -234,21 +236,30 @@ const openPicker = (e: MouseEvent, v: any) => {
   pickerHsv.value = rgbaToHsva(rgba);
   
   // Position calculation
-  // 找到父層的列表項目元素，而不是只用點擊的小圖標
-  const clickedElement = e.currentTarget as HTMLElement;
-  const rowElement = clickedElement.closest('.flex.items-center.gap-3') as HTMLElement || clickedElement;
-  const rect = rowElement.getBoundingClientRect();
-  
   const pickerWidth = 260; // 與 CSS w-[260px] 一致
   // 根據變數類型決定 picker 高度
   const pickerHeight = v.type === 'COLOR' ? 400 : 180;
   
-  let top = rect.bottom + 4; // 縮減往下的間距
-  let left = rect.left;
-
-  // 如果下方空間不夠，就往上彈（直接貼緊元素上方）
+  let top = 100;
+  let left = window.innerWidth / 2 - pickerWidth / 2;
+  
+  // 如果有 event 和 currentTarget，使用元素位置
+  if (e && e.currentTarget) {
+    const clickedElement = e.currentTarget as HTMLElement;
+    const rowElement = clickedElement.closest('.flex.items-center.gap-3') as HTMLElement || clickedElement;
+    const rect = rowElement.getBoundingClientRect();
+    
+    top = rect.bottom + 4;
+    left = rect.left;
+  } else if (e && (e.clientX || e.clientY)) {
+    // 如果只有滑鼠位置（例如從 JSON 視圖點擊）
+    top = e.clientY + 10;
+    left = e.clientX - pickerWidth / 2;
+  }
+  
+  // 如果下方空間不夠，就往上彈
   if (top + pickerHeight > window.innerHeight) {
-    top = Math.max(10, rect.top - pickerHeight);
+    top = Math.max(10, top - pickerHeight - 20);
   }
 
   // 確保左右不超出
@@ -656,6 +667,19 @@ const showToastWithTimer = (message: string, duration = 3000) => {
 };
 
 const viewMode = ref<'list' | 'grid' | 'json'>('list');
+
+// --- JSON Theme ---
+const jsonThemeOptions = [
+  { value: 'vscode', label: 'VS Code' },
+  { value: 'monokai', label: 'Monokai' },
+  { value: 'dracula', label: 'Dracula' },
+  { value: 'github', label: 'GitHub Dark' },
+  { value: 'one-dark', label: 'One Dark' },
+  { value: 'nord', label: 'Nord' },
+  { value: 'tokyo-night', label: 'Tokyo Night' },
+  { value: 'catppuccin', label: 'Catppuccin' }
+] as const;
+const jsonTheme = ref<string>('vscode');
 const hoveredIndex = ref<number | null>(null);
 const hoveredRect = ref<{ top: number; height: number } | null>(null);
 const hoveredVariable = ref<any | null>(null);
@@ -767,6 +791,31 @@ const tooltipPlacement = computed(() => {
   if (!mousePos.value.y) return 'top';
   // If the space above is less than 160px (approx tooltip height), show at bottom
   return mousePos.value.y < 160 ? 'bottom' : 'top';
+});
+
+const jsonData = computed(() => {
+  if (!activeCollection.value) return {};
+  const result: Record<string, any> = {};
+  
+  activeCollection.value.variables.forEach((v: any) => {
+    const parts = v.name.split('/');
+    let current = result;
+    
+    parts.forEach((part: string, index: number) => {
+      if (index === parts.length - 1) {
+        const val = v.values.find((m: any) => m.modeId === activeMode.value)?.value || v.values[0]?.value;
+        current[part] = {
+          value: val,
+          type: v.type.toLowerCase()
+        };
+      } else {
+        if (!current[part]) current[part] = {};
+        current = current[part];
+      }
+    });
+  });
+  
+  return result;
 });
 
 const documentColors = computed(() => {
@@ -1085,6 +1134,112 @@ const handleVariableHover = (e: MouseEvent | null, v: any | null) => {
   hoverTimer.value = setTimeout(() => {
     hoveredVariable.value = v;
   }, 150);
+};
+
+//
+const findVariableByKey = (keyName: string): any | null => {
+  if (!activeCollection.value) return null;
+  
+  // 在變數列表中尋找名稱結尾匹配的變數
+  const variable = activeCollection.value.variables.find((v: any) => {
+    const varName = v.name.split('/').pop() || v.name;
+    return varName === keyName;
+  });
+  
+  return variable || null;
+};
+
+// 處理 JSON node 點擊 - vue-json-pretty 的 nodeClick 事件
+const handleJsonNodeClick = (node: any, _path: string, e: MouseEvent) => {
+  // node 結構: { key, value, path }
+  // 我們需要找到這個 path 對應的變數
+  
+  // path 是類似 "root.textColor" 或 "root.textColor.value" 的格式
+  const pathParts = node.path?.split('.') || [];
+  
+  // 移除 root 前綴
+  if (pathParts[0] === 'root') {
+    pathParts.shift();
+  }
+  
+  // 如果點擊的是 value 或 type，取上一層的變數名稱
+  let variableName = pathParts[pathParts.length - 1];
+  if (variableName === 'value' || variableName === 'type') {
+    variableName = pathParts[pathParts.length - 2];
+  }
+  
+  // 如果沒有變數名稱就返回
+  if (!variableName) return;
+  
+  // 找到對應的變數
+  const variable = findVariableByKey(variableName);
+  
+  if (variable) {
+    // 清除 hover 狀態
+    if (hoverTimer.value) {
+      clearTimeout(hoverTimer.value);
+      hoverTimer.value = null;
+    }
+    hoveredVariable.value = null;
+    
+    // 開啟編輯器
+    openPicker(e, variable);
+  }
+};
+
+// 處理 JSON node hover
+const handleJsonNodeMouseover = (node: any, _path: string, e: MouseEvent) => {
+  // 嘗試從不同來源獲取路徑
+  const path = node.path || _path || '';
+  const pathParts = path.split('.').filter(Boolean);
+  
+  // 移除 root 前綴
+  if (pathParts[0] === 'root') {
+    pathParts.shift();
+  }
+  
+  // 如果 hover 的是 value 或 type，取上一層
+  let variableName = pathParts[pathParts.length - 1];
+  if (variableName === 'value' || variableName === 'type') {
+    variableName = pathParts[pathParts.length - 2];
+  }
+  
+  if (!variableName) return;
+  
+  const variable = findVariableByKey(variableName);
+  
+  if (variable) {
+    // 嘗試從事件或 node 取得位置
+    const clientX = e?.clientX || (node as any)?.event?.clientX || window.innerWidth / 2;
+    const clientY = e?.clientY || (node as any)?.event?.clientY || 100;
+    
+    mousePos.value = { x: clientX, y: clientY };
+    
+    if (hoverTimer.value) {
+      clearTimeout(hoverTimer.value);
+    }
+    
+    hoverTimer.value = setTimeout(() => {
+      hoveredVariable.value = variable;
+    }, 200);
+  }
+};
+
+// 清除 JSON hover 狀態
+const clearJsonHover = () => {
+  if (hoverTimer.value) {
+    clearTimeout(hoverTimer.value);
+    hoverTimer.value = null;
+  }
+  hoveredVariable.value = null;
+};
+
+// 即時追蹤 JSON 區域的滑鼠位置
+const handleJsonMouseMove = (e: MouseEvent) => {
+  // 只有在有 hover 變數時才更新位置
+  if (hoveredVariable.value || hoverTimer.value) {
+    mousePos.value = { x: e.clientX, y: e.clientY };
+  }
 };
 
 const getHoveredColor = () => {
@@ -1532,8 +1687,20 @@ watch(activeCollection, (newCol) => {
 
             <!-- JSON View -->
             <div v-else-if="viewMode === 'json'" class="h-full flex flex-col pt-0 pb-4">
-              <div class="flex items-center justify-between mb-2 px-1">
-                <span class="text-[10px] uppercase font-bold tracking-widest opacity-30">Tokens JSON</span>
+              <div class="flex items-center justify-between py-2 px-2">
+                <div class="flex items-center gap-2">
+                  <span class="text-[10px] opacity-30">Tokens JSON</span>
+                  <!-- Theme Selector -->
+                  <div class="relative">
+                    <select 
+                      v-model="jsonTheme"
+                      class="appearance-none bg-black/30 border border-white/10 rounded px-2 py-1 pr-6 text-[10px] text-white/70 hover:border-white/20 focus:border-figma-accent focus:outline-none cursor-pointer transition-colors"
+                    >
+                      <option v-for="t in jsonThemeOptions" :key="t.value" :value="t.value">{{ t.label }}</option>
+                    </select>
+                    <ChevronDown :size="10" class="absolute right-1.5 top-1/2 -translate-y-1/2 pointer-events-none opacity-40" />
+                  </div>
+                </div>
                 <div class="flex items-center gap-2">
                   <button 
                     @click="downloadJson"
@@ -1549,7 +1716,25 @@ watch(activeCollection, (newCol) => {
                   </button>
                 </div>
               </div>
-              <pre class="flex-1 bg-black/30 p-4 rounded-lg border border-white/5 text-[11px] font-mono overflow-auto selection:bg-figma-accent/30 custom-scrollbar">{{ jsonContent }}</pre>
+              <div 
+                class="flex-1 overflow-auto custom-scrollbar"
+                @mouseleave="clearJsonHover"
+                @mousemove="handleJsonMouseMove"
+              >
+                <VueJsonPretty 
+                  :data="jsonData" 
+                  :deep="4"
+                  :showLength="true"
+                  :showLine="true"
+                  :showIcon="true"
+                  :showDoubleQuotes="true"
+                  :highlightSelectedNode="true"
+                  :collapsedOnClickBrackets="true"
+                  :class="'json-theme-' + jsonTheme"
+                  @nodeClick="handleJsonNodeClick"
+                  @nodeMouseover="handleJsonNodeMouseover"
+                />
+              </div>
             </div>
           </template>
         </div>
@@ -2053,4 +2238,127 @@ html.figma-light .checkerboard {
   background-image: linear-gradient(45deg, #eee 25%, transparent 25%), linear-gradient(-45deg, #eee 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #eee 75%), linear-gradient(-45deg, transparent 75%, #eee 75%);
   background-color: #fff;
 }
+
+/* JSON Theme Base */
+.vjs-tree {
+  font-size: 13px !important;
+  font-family: 'Fira Code', 'SF Mono', 'Monaco', 'Menlo', 'Consolas', monospace !important;
+  font-feature-settings: "liga" 1, "calt" 1; /* Enable ligatures */
+}
+
+/* Line number background (showLine) */
+.vjs-tree-node.is-highlight, .vjs-tree-node:hover {
+  background: rgb(255 255 255 / 5%) !important;
+  border: 0;
+  border-radius: 0;
+}
+
+.vjs-tree-node .vjs-indent-unit.has-line {
+  border-left-color: rgb(255 255 255 / 10%) !important;
+}
+
+/* Key hover effect for tooltip */
+.vjs-key {
+  cursor: pointer;
+  transition: color 0.15s, background-color 0.15s;
+  border-radius: 3px;
+  padding: 0 2px;
+  margin: 0 -2px;
+}
+
+.vjs-key:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.vjs-comment {
+  color: rgb(255 255 255 / 20%) !important;
+}
+
+/* VS Code Theme (Default) */
+.json-theme-vscode .vjs-tree { color: #e0e0e0 !important; }
+.json-theme-vscode .vjs-key { color: #9CDCFE !important; }
+.json-theme-vscode .vjs-value-string { color: #CE9178 !important; }
+.json-theme-vscode .vjs-value-number { color: #B5CEA8 !important; }
+.json-theme-vscode .vjs-value-boolean { color: #569CD6 !important; }
+.json-theme-vscode .vjs-value-null { color: #808080 !important; }
+.json-theme-vscode .vjs-carets { color: #808080 !important; }
+.json-theme-vscode .vjs-carets:hover { color: #fff !important; }
+.json-theme-vscode .vjs-tree-brackets { color: #FFD700 !important; }
+
+/* Monokai Theme */
+.json-theme-monokai .vjs-tree { color: #f8f8f2 !important; }
+.json-theme-monokai .vjs-key { color: #66d9ef !important; }
+.json-theme-monokai .vjs-value-string { color: #e6db74 !important; }
+.json-theme-monokai .vjs-value-number { color: #ae81ff !important; }
+.json-theme-monokai .vjs-value-boolean { color: #f92672 !important; }
+.json-theme-monokai .vjs-value-null { color: #f92672 !important; }
+.json-theme-monokai .vjs-carets { color: #75715e !important; }
+.json-theme-monokai .vjs-carets:hover { color: #a6e22e !important; }
+.json-theme-monokai .vjs-tree-brackets { color: #f8f8f2 !important; }
+
+/* Dracula Theme */
+.json-theme-dracula .vjs-tree { color: #f8f8f2 !important; }
+.json-theme-dracula .vjs-key { color: #8be9fd !important; }
+.json-theme-dracula .vjs-value-string { color: #f1fa8c !important; }
+.json-theme-dracula .vjs-value-number { color: #bd93f9 !important; }
+.json-theme-dracula .vjs-value-boolean { color: #ff79c6 !important; }
+.json-theme-dracula .vjs-value-null { color: #6272a4 !important; }
+.json-theme-dracula .vjs-carets { color: #6272a4 !important; }
+.json-theme-dracula .vjs-carets:hover { color: #50fa7b !important; }
+.json-theme-dracula .vjs-tree-brackets { color: #ffb86c !important; }
+
+/* GitHub Dark Theme */
+.json-theme-github .vjs-tree { color: #c9d1d9 !important; }
+.json-theme-github .vjs-key { color: #7ee787 !important; }
+.json-theme-github .vjs-value-string { color: #a5d6ff !important; }
+.json-theme-github .vjs-value-number { color: #79c0ff !important; }
+.json-theme-github .vjs-value-boolean { color: #ff7b72 !important; }
+.json-theme-github .vjs-value-null { color: #8b949e !important; }
+.json-theme-github .vjs-carets { color: #8b949e !important; }
+.json-theme-github .vjs-carets:hover { color: #58a6ff !important; }
+.json-theme-github .vjs-tree-brackets { color: #f0883e !important; }
+
+/* One Dark Theme */
+.json-theme-one-dark .vjs-tree { color: #abb2bf !important; }
+.json-theme-one-dark .vjs-key { color: #e06c75 !important; }
+.json-theme-one-dark .vjs-value-string { color: #98c379 !important; }
+.json-theme-one-dark .vjs-value-number { color: #d19a66 !important; }
+.json-theme-one-dark .vjs-value-boolean { color: #56b6c2 !important; }
+.json-theme-one-dark .vjs-value-null { color: #5c6370 !important; }
+.json-theme-one-dark .vjs-carets { color: #5c6370 !important; }
+.json-theme-one-dark .vjs-carets:hover { color: #61afef !important; }
+.json-theme-one-dark .vjs-tree-brackets { color: #c678dd !important; }
+
+/* Nord Theme */
+.json-theme-nord .vjs-tree { color: #d8dee9 !important; }
+.json-theme-nord .vjs-key { color: #88c0d0 !important; }
+.json-theme-nord .vjs-value-string { color: #a3be8c !important; }
+.json-theme-nord .vjs-value-number { color: #b48ead !important; }
+.json-theme-nord .vjs-value-boolean { color: #81a1c1 !important; }
+.json-theme-nord .vjs-value-null { color: #4c566a !important; }
+.json-theme-nord .vjs-carets { color: #4c566a !important; }
+.json-theme-nord .vjs-carets:hover { color: #ebcb8b !important; }
+.json-theme-nord .vjs-tree-brackets { color: #5e81ac !important; }
+
+/* Tokyo Night Theme */
+.json-theme-tokyo-night .vjs-tree { color: #a9b1d6 !important; }
+.json-theme-tokyo-night .vjs-key { color: #7aa2f7 !important; }
+.json-theme-tokyo-night .vjs-value-string { color: #9ece6a !important; }
+.json-theme-tokyo-night .vjs-value-number { color: #ff9e64 !important; }
+.json-theme-tokyo-night .vjs-value-boolean { color: #bb9af7 !important; }
+.json-theme-tokyo-night .vjs-value-null { color: #565f89 !important; }
+.json-theme-tokyo-night .vjs-carets { color: #565f89 !important; }
+.json-theme-tokyo-night .vjs-carets:hover { color: #73daca !important; }
+.json-theme-tokyo-night .vjs-tree-brackets { color: #e0af68 !important; }
+
+/* Catppuccin Theme (Mocha) */
+.json-theme-catppuccin .vjs-tree { color: #cdd6f4 !important; }
+.json-theme-catppuccin .vjs-key { color: #f38ba8 !important; }
+.json-theme-catppuccin .vjs-value-string { color: #a6e3a1 !important; }
+.json-theme-catppuccin .vjs-value-number { color: #fab387 !important; }
+.json-theme-catppuccin .vjs-value-boolean { color: #cba6f7 !important; }
+.json-theme-catppuccin .vjs-value-null { color: #6c7086 !important; }
+.json-theme-catppuccin .vjs-carets { color: #6c7086 !important; }
+.json-theme-catppuccin .vjs-carets:hover { color: #94e2d5 !important; }
+.json-theme-catppuccin .vjs-tree-brackets { color: #f9e2af !important; }
 </style>
