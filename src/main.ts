@@ -206,11 +206,11 @@ figma.ui.onmessage = async (msg) => {
     try {
       const v = await figma.variables.getVariableByIdAsync(variableId);
       if (v) {
-        if (varType === 'COLOR') {
+        if (varType === 'Color' || varType === 'COLOR') {
           v.setValueForMode(modeId, parseToFigmaColor(newValue));
-        } else if (varType === 'FLOAT') {
+        } else if (varType === 'Number' || varType === 'FLOAT') {
           v.setValueForMode(modeId, parseFloat(newValue));
-        } else if (varType === 'BOOLEAN') {
+        } else if (varType === 'Boolean' || varType === 'BOOLEAN') {
           v.setValueForMode(modeId, newValue === 'true' || newValue === true);
         } else {
           v.setValueForMode(modeId, newValue);
