@@ -27,7 +27,12 @@ import {
   LayoutList,
   Plus,
   Settings2,
-  Link
+  Link,
+  Layers,
+  Palette,
+  Hash,
+  Type,
+  ToggleLeft
 } from 'lucide-vue-next';
 
 // --- Demo Data Imports ---
@@ -648,6 +653,16 @@ const collections = ref<any[]>([]);
 const activeIndex = ref(0);
 const activeMode = ref<string | null>(null);
 const searchQuery = ref('');
+const searchTypeFilter = ref<'ALL' | 'COLOR' | 'FLOAT' | 'STRING' | 'BOOLEAN'>('ALL');
+const isTypeFilterOpen = ref(false);
+
+const typeFilterOptions = [
+  { value: 'ALL', label: 'All', icon: null },
+  { value: 'COLOR', label: 'Colors', icon: '🎨' },
+  { value: 'FLOAT', label: 'Numbers', icon: '#' },
+  { value: 'STRING', label: 'Strings', icon: 'T' },
+  { value: 'BOOLEAN', label: 'Booleans', icon: 'B' },
+] as const;
 const isSidebarCollapsed = ref(false);
 const sidebarWidth = ref(180);
 const collapsedGroups = ref<Set<string>>(new Set());
@@ -739,10 +754,20 @@ const structuredCollections = computed(() => {
 
 const filteredVariables = computed(() => {
   if (!activeCollection.value) return [];
-  const vars = activeCollection.value.variables || [];
-  if (!searchQuery.value) return vars;
-  const q = searchQuery.value.toLowerCase();
-  return vars.filter((v: any) => v.name.toLowerCase().includes(q));
+  let vars = activeCollection.value.variables || [];
+  
+  // 類型篩選
+  if (searchTypeFilter.value !== 'ALL') {
+    vars = vars.filter((v: any) => v.type === searchTypeFilter.value);
+  }
+  
+  // 文字搜尋
+  if (searchQuery.value) {
+    const q = searchQuery.value.toLowerCase();
+    vars = vars.filter((v: any) => v.name.toLowerCase().includes(q));
+  }
+  
+  return vars;
 });
 
 const groupedVariables = computed(() => {
@@ -1510,7 +1535,7 @@ watch(activeCollection, (newCol) => {
             <PanelLeftOpen :size="14" />
           </button>
           
-          <div class="flex-1 flex items-center gap-2 max-w-sm">
+          <div class="flex-1 flex items-center gap-2 max-w-md">
             <div class="relative flex-1">
               <Search :size="13" class="absolute left-2.5 top-1/2 -translate-y-1/2 opacity-40" />
               <input 
@@ -1519,6 +1544,54 @@ watch(activeCollection, (newCol) => {
                 placeholder="Search variables..."
                 class="w-full bg-white/5 border border-figma-border rounded-md pl-8 pr-3 py-1 text-[12px] text-white/70 focus:text-white focus:outline-none focus:border-figma-accent transition-all placeholder:text-white/20"
               />
+            </div>
+            
+            <!-- Type Filter Dropdown -->
+            <div class="relative">
+              <button 
+                @click="isTypeFilterOpen = !isTypeFilterOpen"
+                class="flex items-center gap-1.5 px-2 py-1 bg-white/5 border border-figma-border rounded-md text-[11px] hover:bg-white/10 transition-colors min-w-[80px]"
+                :class="searchTypeFilter !== 'ALL' ? 'text-figma-accent border-figma-accent/50' : 'text-white/60'"
+              >
+                <!-- SVG Icon -->
+                <Layers v-if="searchTypeFilter === 'ALL'" :size="14" />
+                <Palette v-else-if="searchTypeFilter === 'COLOR'" :size="14" />
+                <Hash v-else-if="searchTypeFilter === 'FLOAT'" :size="14" />
+                <Type v-else-if="searchTypeFilter === 'STRING'" :size="14" />
+                <ToggleLeft v-else-if="searchTypeFilter === 'BOOLEAN'" :size="14" />
+                <span class="flex-1 text-left">{{ typeFilterOptions.find(t => t.value === searchTypeFilter)?.label }}</span>
+                <ChevronDown :size="10" />
+              </button>
+              
+              <!-- Click outside overlay -->
+              <div 
+                v-if="isTypeFilterOpen" 
+                class="fixed inset-0 z-40"
+                @click="isTypeFilterOpen = false"
+              ></div>
+              
+              <!-- Dropdown Menu -->
+              <div 
+                v-if="isTypeFilterOpen" 
+                class="absolute top-full left-0 mt-1 py-1 w-[130px] bg-[#2C2C2C] border border-[#3C3C3C] rounded-lg shadow-xl z-50 overflow-hidden"
+              >
+                <div 
+                  v-for="opt in typeFilterOptions" 
+                  :key="opt.value"
+                  @click="searchTypeFilter = opt.value; isTypeFilterOpen = false"
+                  class="flex items-center gap-2.5 px-3 py-1 text-[11px] hover:bg-figma-accent hover:text-white cursor-pointer transition-colors"
+                  :class="searchTypeFilter === opt.value ? 'text-figma-accent font-medium' : 'text-white/70'"
+                >
+                  <!-- SVG Icon -->
+                  <Layers v-if="opt.value === 'ALL'" :size="14" />
+                  <Palette v-else-if="opt.value === 'COLOR'" :size="14" />
+                  <Hash v-else-if="opt.value === 'FLOAT'" :size="14" />
+                  <Type v-else-if="opt.value === 'STRING'" :size="14" />
+                  <ToggleLeft v-else-if="opt.value === 'BOOLEAN'" :size="14" />
+                  <span class="flex-1">{{ opt.label }}</span>
+                  <Check v-if="searchTypeFilter === opt.value" :size="12" />
+                </div>
+              </div>
             </div>
           </div>
 

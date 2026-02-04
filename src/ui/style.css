@@ -6,7 +6,7 @@
   --figma-color-bg: #2C2C2C;
   --figma-color-text: #CCCCCC;
   --figma-color-border: #3C3C3C;
-  --figma-color-bg-brand: #0078D4;
+  --figma-color-bg-brand: rgb(136 192 208);
 }
 
 body {
@@ -23,12 +23,12 @@ html.figma-light {
   --figma-color-bg: #FFFFFF;
   --figma-color-text: #333333;
   --figma-color-border: #E6E6E6;
-  --figma-color-bg-brand: #18A0FB;
+  --figma-color-bg-brand: rgb(136 192 208);
 }
 
 html.figma-dark {
   --figma-color-bg: #2C2C2C;
   --figma-color-text: #CCCCCC;
   --figma-color-border: #3C3C3C;
-  --figma-color-bg-brand: #0078D4;
+  --figma-color-bg-brand: rgb(136 192 208);
 }
