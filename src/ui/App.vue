@@ -1147,7 +1147,7 @@ const syncPushToGithub = async (pushData: { message: string, branch: string, tas
 </script>
 
 <template>
-  <div class="flex flex-col h-screen overflow-hidden bg-figma-bg text-figma-accent select-none">
+  <div class="flex flex-col h-screen overflow-hidden bg-figma-bg select-none">
     <div class="flex flex-1 overflow-hidden">
       <!-- Sidebar -->
       <Sidebar 
