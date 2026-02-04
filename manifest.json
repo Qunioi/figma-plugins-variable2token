@@ -12,7 +12,9 @@
   "ui": "dist/index.html",
   "networkAccess": {
     "allowedDomains": [
-      "none"
+      "https://api.github.com",
+      "https://github.com",
+      "https://avatars.githubusercontent.com"
     ]
   }
 }

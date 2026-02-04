@@ -52,3 +52,13 @@ export interface TypeFilterOption {
   label: string;
   icon: string | null;
 }
+export interface Settings {
+  jsonTheme: string;
+  githubAccount?: {
+    token: string;
+    username: string;
+    avatarUrl: string;
+  };
+  githubRepo?: string;
+  githubPath?: string;
+}

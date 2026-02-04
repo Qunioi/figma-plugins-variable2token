@@ -12,11 +12,15 @@ import {
   Palette,
   Hash,
   Type,
-  ToggleLeft
+  ToggleLeft,
+  Github,
+  CloudUpload,
+  Settings
 } from 'lucide-vue-next';
 import VueJsonPretty from 'vue-json-pretty';
 import 'vue-json-pretty/lib/styles.css';
 import InfoTooltip from './InfoTooltip.vue';
+import GitHubSettings from './GitHubSettings.vue';
 
 interface Props {
   activeCollection: any | null;
@@ -154,6 +158,9 @@ const handleJsonNodeMouseover = (...args: any[]) => {
 
 const clearJsonHover = () => emit('clear-json-hover');
 const handleJsonMouseMove = (e: MouseEvent) => emit('json-mouse-move', e);
+
+const isGithubSettingsOpen = ref(false); // keep for local if needed, but actually can be removed
+const isSyncing = ref(false); // can be removed
 
 </script>
 
@@ -293,15 +300,15 @@ const handleJsonMouseMove = (e: MouseEvent) => emit('json-mouse-move', e);
           <div class="flex items-center gap-2">
             <button 
               @click="downloadJson"
-              class="text-[10px] flex items-center gap-1.5 px-2 py-1 hover:bg-white/10 rounded transition-colors border border-white/10"
+              class="text-[10px] flex items-center gap-1.5 px-2 py-1 hover:bg-white/10 rounded transition-colors border border-white/10 text-white/60"
             >
-              <Download :size="12" /> Download JSON
+              <Download :size="12" /> Download
             </button>
             <button 
               @click="copyValue(jsonContent, 'JSON')"
-              class="text-[10px] flex items-center gap-1.5 px-2 py-1 hover:bg-white/10 rounded transition-colors border border-white/10"
+              class="text-[10px] flex items-center gap-1.5 px-2 py-1 hover:bg-white/10 rounded transition-colors border border-white/10 text-white/60"
             >
-              <Copy :size="12" /> Copy JSON
+              <Copy :size="12" /> Copy
             </button>
           </div>
         </div>
@@ -334,6 +341,7 @@ const handleJsonMouseMove = (e: MouseEvent) => emit('json-mouse-move', e);
       :mouse-pos="mousePos"
       :placement="tooltipPlacement"
     />
+
   </div>
 </template>
 

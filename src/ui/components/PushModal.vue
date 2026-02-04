@@ -1,0 +1,460 @@
+<script setup lang="ts">
+import { ref, computed, onMounted, watch } from 'vue';
+import { 
+  X, 
+  GitBranch, 
+  CloudUpload, 
+  FileJson, 
+  Github,
+  Check,
+  Folder,
+  ChevronRight,
+  ChevronDown,
+  Minus,
+  AlertCircle,
+  Loader2,
+  ArrowLeft,
+  Search
+} from 'lucide-vue-next';
+
+interface Mode {
+  modeId: string;
+  name: string;
+}
+
+interface Collection {
+  collectionName: string;
+  modes: Mode[];
+  variables: any[];
+}
+
+interface Props {
+  visible: boolean;
+  githubSettings: {
+    githubAccount?: {
+      token: string;
+      username: string;
+      avatarUrl: string;
+    };
+    githubRepo?: string;
+    githubBranch?: string;
+    githubPath?: string;
+  };
+  collections: Collection[];
+  activeCollectionIndex: number;
+}
+
+const props = defineProps<Props>();
+const emit = defineEmits(['close', 'push']);
+
+const activeTab = ref<'files' | 'commit' | 'diff'>('files');
+const commitMessage = ref('從 Figma 更新變數 Token');
+const branch = ref(props.githubSettings.githubBranch || 'main');
+
+// 選中的檔案狀態
+const selectedFiles = ref<Record<string, string[]>>({});
+const collapsedCollections = ref<Set<string>>(new Set());
+
+// --- Diff 相關狀態 ---
+const isCheckingRemote = ref(false);
+const remoteContents = ref<Record<string, string>>({}); // path -> content
+const diffResults = ref<Record<string, { type: 'new' | 'changed' | 'identical' }>>({});
+const activeDiffFile = ref<{ path: string, local: string, remote: string } | null>(null);
+
+// 初始預選
+onMounted(() => {
+  const activeCol = props.collections[props.activeCollectionIndex];
+  if (activeCol) {
+    selectedFiles.value[activeCol.collectionName] = activeCol.modes.map(m => m.modeId);
+  }
+  checkForChanges();
+});
+
+// 當分支改變時重新檢查
+watch(branch, () => {
+  checkForChanges();
+});
+
+const getFinalPath = (colName: string, modeName: string) => {
+  const collectionPath = colName;
+  const fileName = `${modeName}.tokens.json`;
+  const githubPath = props.githubSettings.githubPath || 'assets/tokens/';
+  return `${githubPath.endsWith('/') ? githubPath : githubPath + '/'}${collectionPath}/${fileName}`.replace(/\/+/g, '/');
+};
+
+const getLocalContent = (col: Collection, modeId: string) => {
+  const result: Record<string, any> = {};
+  col.variables.forEach((v: any) => {
+    const parts = v.name.split('/');
+    let current = result;
+    parts.forEach((part: string, index: number) => {
+      if (index === parts.length - 1) {
+        const val = v.values.find((m: any) => m.modeId === modeId)?.value || v.values[0]?.value;
+        current[part] = { value: val, type: v.type.toLowerCase() };
+      } else {
+        if (!current[part]) current[part] = {};
+        current = current[part];
+      }
+    });
+  });
+  return JSON.stringify(result, null, 2);
+};
+
+const checkForChanges = async () => {
+  if (!props.githubSettings.githubAccount?.token || !props.githubSettings.githubRepo) return;
+  
+  isCheckingRemote.value = true;
+  const token = props.githubSettings.githubAccount.token;
+  const repo = props.githubSettings.githubRepo;
+  
+  const newDiffResults: Record<string, any> = {};
+  const newRemoteContents: Record<string, string> = {};
+
+  for (const col of props.collections) {
+    for (const mode of col.modes) {
+      const path = getFinalPath(col.collectionName, mode.name);
+      const localJson = getLocalContent(col, mode.modeId);
+      
+      try {
+        const res = await fetch(`https://api.github.com/repos/${repo}/contents/${path}?ref=${branch.value}`, {
+          headers: { 'Authorization': `token ${token}`, 'Accept': 'application/vnd.github.v3+json' }
+        });
+        
+        if (res.status === 200) {
+          const data = await res.json();
+          const remoteJson = decodeURIComponent(escape(atob(data.content)));
+          newRemoteContents[path] = remoteJson;
+          
+          if (remoteJson === localJson) {
+            newDiffResults[path] = { type: 'identical' };
+          } else {
+            newDiffResults[path] = { type: 'changed' };
+          }
+        } else {
+          newDiffResults[path] = { type: 'new' };
+        }
+      } catch (e) {
+        newDiffResults[path] = { type: 'new' };
+      }
+    }
+  }
+  
+  remoteContents.value = newRemoteContents;
+  diffResults.value = newDiffResults;
+  isCheckingRemote.value = false;
+};
+
+const openDiff = (col: Collection, mode: Mode) => {
+  const path = getFinalPath(col.collectionName, mode.name);
+  const status = diffResults.value[path];
+  if (!status || status.type === 'identical') return;
+
+  activeDiffFile.value = {
+    path: path,
+    local: getLocalContent(col, mode.modeId),
+    remote: remoteContents.value[path] || ''
+  };
+  activeTab.value = 'diff';
+};
+
+const toggleFolder = (name: string) => {
+  if (collapsedCollections.value.has(name)) {
+    collapsedCollections.value.delete(name);
+  } else {
+    collapsedCollections.value.add(name);
+  }
+};
+
+const toggleMode = (colName: string, modeId: string) => {
+  if (!selectedFiles.value[colName]) {
+    selectedFiles.value[colName] = [];
+  }
+  const index = selectedFiles.value[colName].indexOf(modeId);
+  if (index > -1) {
+    selectedFiles.value[colName].splice(index, 1);
+  } else {
+    selectedFiles.value[colName].push(modeId);
+  }
+};
+
+const toggleCollection = (col: Collection) => {
+  const currentSelected = selectedFiles.value[col.collectionName] || [];
+  if (currentSelected.length === col.modes.length) {
+    selectedFiles.value[col.collectionName] = [];
+  } else {
+    selectedFiles.value[col.collectionName] = col.modes.map(m => m.modeId);
+  }
+};
+
+const getCollectionState = (col: Collection) => {
+  const selected = selectedFiles.value[col.collectionName] || [];
+  if (selected.length === 0) return 'none';
+  if (selected.length === col.modes.length) return 'all';
+  return 'some';
+};
+
+const isModeSelected = (colName: string, modeId: string) => {
+  return selectedFiles.value[colName]?.includes(modeId);
+};
+
+const getDiffStatus = (colName: string, modeName: string) => {
+  const path = getFinalPath(colName, modeName);
+  return diffResults.value[path] || { type: 'new' };
+};
+
+const totalSelectedCount = computed(() => {
+  return Object.values(selectedFiles.value).reduce((sum, modes) => sum + modes.length, 0);
+});
+
+const hasActualChangesSelected = computed(() => {
+  let hasChanges = false;
+  props.collections.forEach(col => {
+    const selectedModes = selectedFiles.value[col.collectionName] || [];
+    selectedModes.forEach(modeId => {
+      const mode = col.modes.find(m => m.modeId === modeId);
+      if (mode) {
+        const status = getDiffStatus(col.collectionName, mode.name);
+        if (status.type !== 'identical') hasChanges = true;
+      }
+    });
+  });
+  return hasChanges;
+});
+
+// --- Simple Line Diffing Logic ---
+const diffLines = computed(() => {
+  if (!activeDiffFile.value) return [];
+  const oldLines = activeDiffFile.value.remote.split('\n');
+  const newLines = activeDiffFile.value.local.split('\n');
+  
+  // 這裡使用一個極簡的對照方式 (僅呈現新舊內容，不進行複雜的 LCS 演算法)
+  // 如果是全新檔案
+  if (!activeDiffFile.value.remote) {
+    return newLines.map(line => ({ type: 'add', content: line }));
+  }
+
+  // 為了呈現，我們這裡做一個簡單的對位顯示
+  const result: { type: 'add' | 'remove' | 'same', content: string }[] = [];
+  const maxLines = Math.max(oldLines.length, newLines.length);
+  
+  for(let i = 0; i < maxLines; i++) {
+    if (oldLines[i] === newLines[i]) {
+      result.push({ type: 'same', content: oldLines[i] });
+    } else {
+      if (oldLines[i] !== undefined) result.push({ type: 'remove', content: oldLines[i] });
+      if (newLines[i] !== undefined) result.push({ type: 'add', content: newLines[i] });
+    }
+  }
+  return result;
+});
+
+const handlePush = () => {
+  if (totalSelectedCount.value === 0) return;
+  
+  const tasks: any[] = [];
+  props.collections.forEach(col => {
+    const selectedModes = selectedFiles.value[col.collectionName] || [];
+    selectedModes.forEach(modeId => {
+      const mode = col.modes.find(m => m.modeId === modeId);
+      if (mode) {
+        tasks.push({
+          path: getFinalPath(col.collectionName, mode.name),
+          content: getLocalContent(col, mode.modeId),
+          collectionName: col.collectionName,
+          modeName: mode.name
+        });
+      }
+    });
+  });
+
+  emit('push', {
+    message: commitMessage.value,
+    branch: branch.value,
+    tasks: tasks
+  });
+};
+</script>
+
+<template>
+  <transition name="modal">
+    <div v-if="visible" class="fixed inset-0 z-[10000] flex items-center justify-center p-6 text-white/90">
+      <div class="absolute inset-0 bg-black/60 backdrop-blur-sm" @click="$emit('close')"></div>
+      
+      <div class="relative w-full max-w-[540px] bg-[#1E1E1E] border border-white/10 rounded-xl shadow-[0_20px_50px_rgba(0,0,0,0.5)] flex flex-col overflow-hidden">
+        <!-- 標題 -->
+        <div class="flex items-center justify-between px-4 py-3 border-b border-white/5 bg-white/5">
+          <div class="flex items-center gap-2">
+            <span class="text-[13px] font-bold font-mono">Push to GitHub</span>
+          </div>
+          <button @click="$emit('close')" class="p-1 hover:bg-white/10 rounded-md transition-colors">
+            <X :size="16" class="text-white/40" />
+          </button>
+        </div>
+
+        <!-- 頁籤 (不含 Diff 頁籤，Diff 是覆蓋上去的暫時狀態) -->
+        <div v-if="activeTab !== 'diff'" class="px-4 pt-3 flex items-center gap-1 border-b border-white/5 bg-white/[0.02]">
+          <button 
+            @click="activeTab = 'files'"
+            class="px-4 py-1.5 text-[11px] font-medium rounded-t-lg transition-all border-b-2"
+            :class="activeTab === 'files' ? 'text-figma-accent border-figma-accent bg-figma-accent/5' : 'text-white/40 border-transparent hover:text-white/60'"
+          >
+            選擇變數集合 ({{ totalSelectedCount }})
+          </button>
+          <button 
+            @click="activeTab = 'commit'"
+            class="px-4 py-1.5 text-[11px] font-medium rounded-t-lg transition-all border-b-2"
+            :class="activeTab === 'commit' ? 'text-figma-accent border-figma-accent bg-figma-accent/5' : 'text-white/40 border-transparent hover:text-white/60'"
+          >
+            提交資訊
+          </button>
+          
+          <div v-if="isCheckingRemote" class="ml-auto flex items-center gap-2 pr-2 animate-pulse">
+            <Loader2 :size="10" class="animate-spin text-figma-accent" />
+            <span class="text-[9px] text-figma-accent/60 uppercase font-bold tracking-tighter">Comparing...</span>
+          </div>
+        </div>
+
+        <!-- 內容 -->
+        <div class="flex flex-col min-h-[400px] max-h-[580px] overflow-hidden">
+          
+          <!-- 1. 檔案清單 -->
+          <div v-if="activeTab === 'files'" class="flex-1 overflow-y-auto p-2 flex flex-col custom-scrollbar bg-black/10">
+            <div v-for="col in collections" :key="col.collectionName" class="mb-1">
+              <div class="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-white/5 transition-colors group cursor-pointer" @click="toggleFolder(col.collectionName)">
+                <div class="w-4 h-4 flex items-center justify-center">
+                  <ChevronDown v-if="!collapsedCollections.has(col.collectionName)" :size="14" class="text-white/20 group-hover:text-white/60" />
+                  <ChevronRight v-else :size="14" class="text-white/20 group-hover:text-white/60" />
+                </div>
+                <div @click.stop="toggleCollection(col)" class="w-4 h-4 rounded border flex items-center justify-center transition-all bg-black/40"
+                  :class="getCollectionState(col) !== 'none' ? 'bg-indigo-500 border-indigo-500' : 'border-white/10 group-hover:border-white/20'">
+                  <Check v-if="getCollectionState(col) === 'all'" :size="10" class="text-black" strokeWidth="4" />
+                  <Minus v-else-if="getCollectionState(col) === 'some'" :size="10" class="text-black" strokeWidth="4" />
+                </div>
+                <Folder :size="14" class="text-indigo-400/60" />
+                <span class="text-[12px] font-medium text-white/80">{{ col.collectionName }}</span>
+              </div>
+
+              <!-- Modes -->
+              <div v-if="!collapsedCollections.has(col.collectionName)" class="ml-6 flex flex-col gap-0.5 mt-0.5 border-l border-white/5 pl-2">
+                <div v-for="mode in col.modes" :key="mode.modeId" @click="toggleMode(col.collectionName, mode.modeId)"
+                  class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-white/5 transition-colors cursor-pointer group"
+                >
+                  <div class="w-4 h-4 rounded border flex items-center justify-center transition-all bg-black/40 shrink-0"
+                    :class="isModeSelected(col.collectionName, mode.modeId) ? 'bg-indigo-500 border-indigo-500' : 'border-white/10 group-hover:border-white/20'">
+                    <Check v-if="isModeSelected(col.collectionName, mode.modeId)" :size="10" class="text-black" strokeWidth="4" />
+                  </div>
+                  <FileJson :size="14" class="text-white/20" />
+                  <span class="text-[12px] flex-1" :class="isModeSelected(col.collectionName, mode.modeId) ? 'text-white' : 'text-white/40'">{{ mode.name }}</span>
+                  
+                  <div @click.stop="openDiff(col, mode)"
+                    class="px-1.5 py-0.5 rounded text-[8px] font-bold uppercase tracking-wide transition-all translate-y-0 active:translate-y-px"
+                    :class="{
+                      'bg-green-500/10 text-green-400 border border-green-500/20 cursor-pointer hover:bg-green-500/20': getDiffStatus(col.collectionName, mode.name).type === 'new',
+                      'bg-amber-500/10 text-amber-400 border border-amber-500/20 cursor-pointer hover:bg-amber-500/20': getDiffStatus(col.collectionName, mode.name).type === 'changed',
+                      'bg-white/5 text-white/20 pointer-events-none': getDiffStatus(col.collectionName, mode.name).type === 'identical'
+                    }"
+                  >
+                    {{ getDiffStatus(col.collectionName, mode.name).type === 'identical' ? 'Synced' : getDiffStatus(col.collectionName, mode.name).type }}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 2. 提交資訊 -->
+          <div v-if="activeTab === 'commit'" class="flex-1 p-5 flex flex-col gap-6 animate-in slide-in-from-bottom-2 duration-300">
+             <div class="space-y-2">
+              <label class="text-[10px] font-bold text-indigo-400/60 uppercase tracking-widest px-1">Repo Target</label>
+              <div class="bg-indigo-500/5 border border-indigo-500/10 px-3 py-2.5 rounded-lg text-[12px] flex items-center gap-2">
+                <Github :size="14" class="opacity-50" />
+                {{ githubSettings.githubRepo }}
+              </div>
+            </div>
+            <div class="space-y-2">
+              <label class="text-[10px] font-bold text-indigo-400/60 uppercase tracking-widest px-1">Commit Message</label>
+              <textarea v-model="commitMessage" class="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2.5 text-[12px] focus:border-indigo-500/50 focus:outline-none min-h-[120px] resize-none"></textarea>
+            </div>
+            <div class="space-y-2">
+              <label class="text-[10px] font-bold text-indigo-400/60 uppercase tracking-widest px-1">Branch</label>
+              <div class="relative">
+                <GitBranch :size="14" class="absolute left-3 top-1/2 -translate-y-1/2 text-white/30" />
+                <input v-model="branch" class="w-full bg-black/40 border border-white/10 rounded-lg pl-9 pr-3 py-2 text-[12px] focus:border-indigo-500/50 focus:outline-none" />
+              </div>
+            </div>
+          </div>
+
+          <!-- 3. Diff View -->
+          <div v-if="activeTab === 'diff' && activeDiffFile" class="flex-1 overflow-hidden flex flex-col bg-[#0d0d0d] animate-in fade-in duration-300">
+            <div class="flex items-center justify-between px-4 py-2 bg-white/5 border-b border-white/5">
+              <div class="flex items-center gap-2 text-[11px]">
+                <button @click="activeTab = 'files'" class="p-1 hover:bg-white/10 rounded-md -ml-1 transition-colors">
+                  <ArrowLeft :size="14" />
+                </button>
+                <span class="text-white/40 uppercase font-bold tracking-widest text-[9px]">DIFFERENCE:</span>
+                <span class="text-indigo-400 font-mono">{{ activeDiffFile.path.split('/').pop() }}</span>
+              </div>
+              <div class="flex gap-4 text-[9px] uppercase font-bold">
+                 <div class="flex items-center gap-1.5 text-red-400/60"><div class="w-2 h-2 bg-red-500/20 border border-red-500/40 rounded-sm"></div> REMOTE</div>
+                 <div class="flex items-center gap-1.5 text-green-400/60"><div class="w-2 h-2 bg-green-500/20 border border-green-500/40 rounded-sm"></div> LOCAL</div>
+              </div>
+            </div>
+            <div class="flex-1 overflow-y-auto p-4 font-mono text-[11px] custom-scrollbar leading-relaxed bg-black/40">
+              <div v-for="(line, idx) in diffLines" :key="idx" 
+                class="flex gap-3 px-2 border-l-2"
+                :class="{
+                  'bg-green-500/10 border-green-500/50 text-green-400/90': line.type === 'add',
+                  'bg-red-500/10 border-red-500/40 text-red-400/70': line.type === 'remove',
+                  'border-transparent text-white/20': line.type === 'same'
+                }"
+              >
+                <div class="w-6 text-right select-none opacity-30">{{ idx + 1 }}</div>
+                <div class="w-4 select-none opacity-50">{{ line.type === 'add' ? '+' : line.type === 'remove' ? '-' : ' ' }}</div>
+                <pre class="whitespace-pre-wrap flex-1">{{ line.content }}</pre>
+              </div>
+            </div>
+          </div>
+
+        </div>
+        
+        <!-- 下方列 -->
+        <div class="p-4 bg-white/5 border-t border-white/5 flex items-center justify-between">
+          <div v-if="activeTab === 'diff'" class="text-[11px] text-white/40 italic">
+             正在瀏覽變更內容，您可以點擊左上角返回
+          </div>
+          <div v-else-if="!hasActualChangesSelected && totalSelectedCount > 0" class="flex items-center gap-2 text-amber-400/80">
+            <AlertCircle :size="14" />
+            <span class="text-[10px] font-medium">內容與遠端一致</span>
+          </div>
+          <div v-else class="flex flex-col">
+            <span class="text-[10px] text-white/40 uppercase font-bold tracking-tighter">Ready to Deploy</span>
+            <span class="text-[13px] font-bold">{{ totalSelectedCount }} <span class="text-[10px] font-normal opacity-30">files</span></span>
+          </div>
+          
+          <div class="flex gap-2">
+            <button @click="$emit('close')" class="px-4 py-2 rounded-lg text-[11px] font-bold text-white/40 hover:bg-white/5 transition-all">Cancel</button>
+            <button 
+              v-if="activeTab !== 'diff'"
+              @click="handlePush"
+              :disabled="totalSelectedCount === 0 || (!hasActualChangesSelected)"
+              class="bg-indigo-500 text-black px-6 py-2 rounded-lg text-[12px] font-bold hover:brightness-110 active:scale-[0.98] transition-all flex items-center gap-2 shadow-lg shadow-indigo-500/20 disabled:opacity-20 disabled:grayscale"
+            >
+              <CloudUpload :size="16" />
+              Confirm & Push
+            </button>
+            <button v-else @click="activeTab = 'files'" class="bg-white/10 px-6 py-2 rounded-lg text-[11px] font-bold hover:bg-white/20 transition-all">
+              Back to List
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </transition>
+</template>
+
+<style scoped>
+.modal-enter-active, .modal-leave-active { transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
+.modal-enter-from, .modal-leave-to { opacity: 0; }
+.modal-enter-from .relative, .modal-leave-to .relative { transform: scale(0.95); opacity: 0; }
+.custom-scrollbar::-webkit-scrollbar { width: 4px; }
+.custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.1); border-radius: 10px; }
+</style>

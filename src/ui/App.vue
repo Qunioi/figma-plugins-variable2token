@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, watch } from 'vue';
+import { ref, onMounted, computed, watch, toRaw } from 'vue';
 import VueJsonPretty from 'vue-json-pretty';
 import 'vue-json-pretty/lib/styles.css';
 import { 
@@ -24,6 +24,8 @@ import Sidebar from './components/Sidebar.vue';
 import VariableList from './components/VariableList.vue';
 import Toolbar from './components/Toolbar.vue';
 import Footer from './components/Footer.vue';
+import PushModal from './components/PushModal.vue';
+import GitHubSettingsModal from './components/GitHubSettings.vue';
 import { useHistory } from '../composables/useHistory';
 
 
@@ -52,6 +54,9 @@ const pickerTarget = ref<{
   initialName: string, 
   initialValue: string,
   initialDescription: string,
+  originalName: string,      // 視窗開啟時的原始名稱
+  originalValue: string,     // 視窗開啟時的原始值
+  originalDescription: string, // 視窗開啟時的原始描述
   alias?: { id: string, name: string }
 } | null>(null);
 const pickerHsv = ref({ h: 0, s: 0, v: 0, a: 1 });
@@ -78,6 +83,14 @@ const selectedVariableId = ref<string | null>(null);
 const isSidebarCollapsed = ref(false);
 const sidebarWidth = ref(180);
 const collapsedGroups = ref<Set<string>>(new Set());
+const githubSettings = ref({
+  githubAccount: undefined as { token: string, username: string, avatarUrl: string } | undefined,
+  githubRepo: '',
+  githubPath: 'assets/tokens/',
+  githubBranch: 'main'
+});
+const isPushModalOpen = ref(false);
+const isGithubSettingsInAppOpen = ref(false);
 const toastMessage = ref('');
 const showToast = ref(false);
 let toastTimer: ReturnType<typeof setTimeout> | null = null;
@@ -100,6 +113,27 @@ const allVariables = computed(() => {
     });
   });
   return vars;
+});
+
+const jsonDataForActiveCollection = computed(() => {
+  const activeCol = collections.value[activeIndex.value];
+  if (!activeCol) return {};
+  
+  const result: Record<string, any> = {};
+  activeCol.variables.forEach((v: any) => {
+    const parts = v.name.split('/');
+    let current = result;
+    parts.forEach((part: string, index: number) => {
+      if (index === parts.length - 1) {
+        const val = v.values.find((m: any) => m.modeId === activeMode.value)?.value || v.values[0]?.value;
+        current[part] = { value: val, type: v.type.toLowerCase() };
+      } else {
+        if (!current[part]) current[part] = {};
+        current = current[part];
+      }
+    });
+  });
+  return result;
 });
 
 // Redundant computed removed
@@ -134,6 +168,9 @@ const openPicker = (e: MouseEvent, v: any) => {
     initialName: v.name.split('/').pop() || '',
     initialValue: v.type === 'Color' ? currentVal : String(currentVal),
     initialDescription: v.description || "",
+    originalName: v.name.split('/').pop() || '',
+    originalValue: v.type === 'Color' ? currentVal : String(currentVal),
+    originalDescription: v.description || "",
     alias: aliasInfo
   };
   pickerInputName.value = pickerTarget.value.name;
@@ -177,24 +214,38 @@ const openPicker = (e: MouseEvent, v: any) => {
   
   pickerPos.value = { top, left };
 };
+const handleUpdateTarget = (newTarget: any) => {
+  pickerTarget.value = newTarget;
+  if (newTarget) {
+    pickerInputName.value = newTarget.name;
+    pickerDescription.value = newTarget.initialDescription;
+  }
+};
 
 const updateFromPicker = () => {
-  if (!pickerTarget.value) return;
+  if (!pickerTarget.value || pickerTarget.value.type !== 'Color') return;
   const rgba = hsvaToRgba(pickerHsv.value);
-  const hex = rgbaToHex(rgba);
-  // 使用靜默模式更新，拖拽中不顯示通知
-  updateVariable(pickerTarget.value.id, hex, pickerTarget.value.type, undefined, undefined, true);
+  const hex = rgbaToHex8(rgba); // 使用 hex8 以支援透明度
+  
+  // 僅更新本地狀態，不發送給 Figma
+  pickerTarget.value.initialValue = hex.toUpperCase();
 };
+
+// 增加監聽，確保選色器操作能反映在本地 state
+watch(pickerHsv, () => {
+  if (pickerVisible.value && pickerTarget.value?.type === 'Color') {
+    updateFromPicker();
+  }
+}, { deep: true });
 
 const handleValueInput = (val: string) => {
   if (!pickerTarget.value) return;
-  const type = pickerTarget.value.type;
-  let finalValue: any = val;
-  if (type === 'FLOAT') {
-    finalValue = parseFloat(val);
-    if (isNaN(finalValue)) return;
-  }
-  updateVariable(pickerTarget.value.id, finalValue, type, undefined, undefined, true);
+  
+  // 僅更新本地目標狀態，確保 ColorPicker 內的輸入框同步，不發送給 Figma
+  pickerTarget.value = {
+    ...pickerTarget.value,
+    initialValue: val
+  };
 };
 
 const resetPickerName = () => {
@@ -371,7 +422,6 @@ const closePicker = () => {
   // 如果有重複名稱，禁止關閉
   if (isDuplicateName.value) {
     showToastWithTimer('變數名稱已存在，請修改後再關閉', 3000);
-    // 自動將焦點移回名稱輸入框
     setTimeout(() => {
       document.getElementById('picker-name-input')?.focus();
     }, 0);
@@ -379,43 +429,63 @@ const closePicker = () => {
   }
   
   if (pickerTarget.value) {
-    const nameChanged = pickerInputName.value !== pickerTarget.value.initialName;
-    const descChanged = pickerDescription.value !== pickerTarget.value.initialDescription;
+    const nameChanged = pickerInputName.value !== pickerTarget.value.originalName;
+    const descChanged = pickerDescription.value !== pickerTarget.value.originalDescription;
     
-    // 根據變數類型判斷 value 是否有變化
+    // 比較最終值與開啟時的原始值
     let valueChanged = false;
-    if (pickerTarget.value.type === 'COLOR') {
-      const currentHex8 = rgbaToHex8(hsvaToRgba(pickerHsv.value)).toUpperCase();
-      const initialHex8 = rgbaToHex8(hexToRgba(pickerTarget.value.initialValue)).toUpperCase();
-      valueChanged = currentHex8 !== initialHex8;
+    let finalValue: any;
+
+    if (pickerTarget.value.type === 'Color') {
+       // 顏色類型：從選色器的 HSV 值計算最終顏色
+       const rgba = hsvaToRgba(pickerHsv.value);
+       finalValue = rgbaToHex8(rgba).toUpperCase();
+       valueChanged = finalValue !== pickerTarget.value.originalValue.toUpperCase();
     } else {
-      // 對於 STRING/FLOAT 類型，比較 pickerInputValue
-      valueChanged = pickerInputValue.value !== pickerTarget.value.initialValue;
+       // 其他類型（String/Number/Boolean）：直接使用 initialValue
+       finalValue = pickerTarget.value.initialValue;
+       valueChanged = finalValue !== pickerTarget.value.originalValue;
     }
     
     if (nameChanged || valueChanged || descChanged) {
-       // 只有在真正有修改時才顯示通知並紀錄歷史
-       lastChange.value = { 
+       // 1. 建立 Undo 紀錄（使用最原始的值）
+       setLastChange({ 
          variableId: pickerTarget.value.id, 
          modeId: activeMode.value!, 
-         oldValue: valueChanged ? pickerTarget.value.initialValue : undefined,
-         oldName: nameChanged ? pickerTarget.value.initialName : undefined,
-         oldDescription: descChanged ? pickerTarget.value.initialDescription : undefined,
+         oldValue: valueChanged ? pickerTarget.value.originalValue : undefined,
+         oldName: nameChanged ? pickerTarget.value.originalName : undefined,
+         oldDescription: descChanged ? pickerTarget.value.originalDescription : undefined,
          varType: pickerTarget.value.type, 
-         label: pickerTarget.value.name 
-       };
+         label: pickerInputName.value 
+       });
 
-       // 如果名稱有變動，同步更新
+       // 2. 送出所有變更至 Figma
+       if (valueChanged) {
+         // 這裡呼叫 updateVariable 並帶入 silent=true 避免重複跳通知
+         updateVariable(pickerTarget.value.id, finalValue, pickerTarget.value.type, undefined, undefined, true);
+       }
+
        if (nameChanged) {
-         handleRename(true);
+         parent.postMessage({ 
+           pluginMessage: { 
+             type: 'update-name', 
+             variableId: pickerTarget.value.id, 
+             newName: pickerInputName.value 
+           } 
+         }, '*');
        }
 
-       // 如果描述有變動，離開時才同步
        if (descChanged) {
-         handleUpdateDescription();
+          parent.postMessage({ 
+            pluginMessage: { 
+              type: 'update-description', 
+              variableId: pickerTarget.value.id, 
+              description: pickerDescription.value 
+            } 
+          }, '*');
        }
 
-       showToastWithTimer(`Updated ${pickerTarget.value.name}`);
+       showToastWithTimer(`已更新變數: ${pickerInputName.value}`);
     }
   }
   pickerVisible.value = false;
@@ -561,7 +631,7 @@ const updateVariable = (vId: string, newValue: any, vType: string, oldValue?: an
   // 紀錄歷史以便復原 (非靜默模式下才跳通知)
   if (!silent && oldValue !== undefined && label) {
     setLastChange({ variableId: vId, modeId: activeMode.value, oldValue, varType: vType, label });
-    showToastWithTimer(`Updated ${label}`);
+    showToastWithTimer(`已更新 ${label}`);
   }
 
   parent.postMessage({ 
@@ -781,6 +851,8 @@ const mapFigmaType = (type: string): VariableType => {
 };
 
 // --- Lifecycle ---
+const isInitialLoading = ref(true);
+
 onMounted(() => {
   refresh();
   window.onmessage = (event) => {
@@ -797,9 +869,23 @@ onMounted(() => {
       }));
 
       // 套用儲存的設定
-      if (msg.settings?.jsonTheme) {
-        jsonTheme.value = msg.settings.jsonTheme;
+      if (msg.settings) {
+        if (msg.settings.jsonTheme) jsonTheme.value = msg.settings.jsonTheme;
+        
+        // 確保整塊正確套用，不被 watch 覆寫
+        const savedGithub = { ...githubSettings.value };
+        if (msg.settings.githubAccount) savedGithub.githubAccount = msg.settings.githubAccount;
+        if (msg.settings.githubRepo) savedGithub.githubRepo = msg.settings.githubRepo;
+        if (msg.settings.githubPath) savedGithub.githubPath = msg.settings.githubPath;
+        if (msg.settings.githubBranch) savedGithub.githubBranch = msg.settings.githubBranch;
+        
+        githubSettings.value = savedGithub;
       }
+      
+      // 標記載入完成，之後的變化才會觸發儲存
+      setTimeout(() => {
+        isInitialLoading.value = false;
+      }, 100);
 
       if (activeIndex.value >= collections.value.length) {
         activeIndex.value = 0;
@@ -887,14 +973,96 @@ watch(activeCollection, (newCol) => {
 });
 
 // 監聽設定變化並自動儲存
-watch(jsonTheme, (newTheme) => {
+watch([jsonTheme, githubSettings], ([newTheme, newGithub]) => {
+  if (isInitialLoading.value) return;
+  
+  // 使用 toRaw 並進行 JSON 序列化確保移除所有 Proxy 轉為純 JS 物件
+  const settingsToSave = JSON.parse(JSON.stringify({ 
+    jsonTheme: newTheme,
+    ...newGithub
+  }));
+
   parent.postMessage({ 
     pluginMessage: { 
       type: 'save-settings', 
-      settings: { jsonTheme: newTheme } 
+      settings: settingsToSave
     } 
   }, '*');
-});
+}, { deep: true });
+
+const updateGithubSettings = (newSettings: any) => {
+  githubSettings.value = { 
+    ...githubSettings.value,
+    ...newSettings 
+  };
+  showToastWithTimer('GitHub 帳號資訊已同步');
+};
+
+const handleLogout = () => {
+  githubSettings.value.githubAccount = undefined;
+  showToastWithTimer('已登出 GitHub 帳號');
+};
+
+const syncPushToGithub = async (pushData: { message: string, branch: string, tasks: { path: string, content: string, collectionName: string, modeName: string }[] }) => {
+  const account = githubSettings.value.githubAccount;
+  const { githubRepo } = githubSettings.value;
+
+  if (!account?.token || !githubRepo || !pushData.tasks.length) {
+    if (!account?.token) isGithubSettingsInAppOpen.value = true;
+    return;
+  }
+
+  isPushModalOpen.value = false;
+  const total = pushData.tasks.length;
+  let successCount = 0;
+
+  for (let i = 0; i < total; i++) {
+    const task = pushData.tasks[i];
+    showToastWithTimer(`正在推送 (${i + 1}/${total}): ${task.modeName}...`, 10000);
+
+    try {
+      // 1. 獲取現有檔案的 SHA
+      const getRes = await fetch(`https://api.github.com/repos/${githubRepo}/contents/${task.path}?ref=${pushData.branch}`, {
+        headers: { 'Authorization': `token ${account.token}`, 'Accept': 'application/vnd.github.v3+json' }
+      });
+
+      let sha = undefined;
+      if (getRes.status === 200) {
+        const data = await getRes.json();
+        sha = data.sha;
+      }
+
+      // 2. 推送更新
+      const putRes = await fetch(`https://api.github.com/repos/${githubRepo}/contents/${task.path}`, {
+        method: 'PUT',
+        headers: { 'Authorization': `token ${account.token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: pushData.message,
+          content: btoa(unescape(encodeURIComponent(task.content))),
+          sha: sha,
+          branch: pushData.branch
+        })
+      });
+
+      if (putRes.ok) {
+        successCount++;
+      } else {
+        const err = await putRes.json();
+        console.error(`GitHub Error for ${task.path}:`, err);
+      }
+    } catch (error: any) {
+      console.error(`Failed to sync ${task.path}:`, error);
+    }
+  }
+
+  if (successCount === total) {
+    showToastWithTimer(`成功推送全部 ${total} 個檔案`);
+  } else if (successCount > 0) {
+    showToastWithTimer(`部分推送成功 (${successCount}/${total})`);
+  } else {
+    alert('推送失敗，請檢查網路或倉庫設定。');
+  }
+};
 
 </script>
 
@@ -962,7 +1130,12 @@ watch(jsonTheme, (newTheme) => {
     </div>
 
         <!-- Footer Component -->
-        <Footer version="1.0.0" status="Ready" />
+        <Footer 
+          version="0.2.1" 
+          :github-settings="githubSettings"
+          @open-github-settings="isGithubSettingsInAppOpen = true"
+          @open-push-modal="isPushModalOpen = true"
+        />
 
     <!-- Resize Handle -->
     <div 
@@ -1002,6 +1175,7 @@ watch(jsonTheme, (newTheme) => {
       :is-duplicate-name="isDuplicateName"
       :collections="collections"
       @close="closePicker"
+      @update:target="handleUpdateTarget"
       @rename="handleRename"
       @update-description="handleUpdateDescription"
       @set-alias="setVariableAlias"
@@ -1013,6 +1187,26 @@ watch(jsonTheme, (newTheme) => {
 
 
 <!-- Tooltip and logic moved to VariableList.vue -->
+    
+    <!-- GitHub Settings Modal -->
+    <GitHubSettingsModal 
+      :visible="isGithubSettingsInAppOpen"
+      :settings="githubSettings"
+      @close="isGithubSettingsInAppOpen = false"
+      @save="updateGithubSettings"
+      @logout="handleLogout"
+    />
+
+    <!-- Push Modal -->
+    <PushModal 
+      v-if="isPushModalOpen"
+      :visible="isPushModalOpen"
+      :github-settings="githubSettings"
+      :collections="collections"
+      :active-collection-index="activeIndex"
+      @close="isPushModalOpen = false"
+      @push="syncPushToGithub"
+    />
 
   </div>
 </template>
