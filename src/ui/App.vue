@@ -795,6 +795,12 @@ onMounted(() => {
           type: mapFigmaType(v.type)
         }))
       }));
+
+      // 套用儲存的設定
+      if (msg.settings?.jsonTheme) {
+        jsonTheme.value = msg.settings.jsonTheme;
+      }
+
       if (activeIndex.value >= collections.value.length) {
         activeIndex.value = 0;
       }
@@ -878,6 +884,16 @@ watch(activeCollection, (newCol) => {
   if (newCol?.modes?.length > 0 && (!activeMode.value || !newCol.modes.find((m:any) => m.modeId === activeMode.value))) {
     activeMode.value = newCol.modes[0].modeId;
   }
+});
+
+// 監聽設定變化並自動儲存
+watch(jsonTheme, (newTheme) => {
+  parent.postMessage({ 
+    pluginMessage: { 
+      type: 'save-settings', 
+      settings: { jsonTheme: newTheme } 
+    } 
+  }, '*');
 });
 
 </script>

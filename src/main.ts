@@ -186,7 +186,14 @@ async function refreshVariables() {
         });
     }
 
-    figma.ui.postMessage({ type: 'render-list', data: result });
+    // 讀取儲存的設定
+    const savedSettings = await figma.clientStorage.getAsync('v2t-settings');
+    
+    figma.ui.postMessage({ 
+      type: 'render-list', 
+      data: result,
+      settings: savedSettings || { jsonTheme: 'vscode' }
+    });
 
   } catch (err) {
     console.error("Critical Error in refreshVariables:", err);
@@ -270,6 +277,11 @@ figma.ui.onmessage = async (msg) => {
     } catch (e) {
       console.error("Failed to update description:", e);
     }
+  }
+
+  // 儲存設定
+  if (msg.type === 'save-settings') {
+    await figma.clientStorage.setAsync('v2t-settings', msg.settings);
   }
 
   // 處理視窗縮放
