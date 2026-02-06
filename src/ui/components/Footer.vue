@@ -20,7 +20,7 @@ interface Props {
 }
 
 defineProps<Props>();
-const emit = defineEmits(['open-github-settings', 'open-push-modal', 'pull']);
+const emit = defineEmits(['open-github-settings', 'open-push-modal', 'open-pull-modal']);
 </script>
 
 <template>
@@ -41,9 +41,9 @@ const emit = defineEmits(['open-github-settings', 'open-push-modal', 'pull']);
       <div class="flex items-center gap-1 ml-1">
         <button 
           v-if="githubSettings.githubAccount"
-          @click="$emit('pull')"
-          class="p-1.5 text-white/30 hover:text-figma-accent hover:bg-white/5 rounded transition-all active:scale-[0.98]"
-          title="從 GitHub 下載 (Pull)"
+          @click="$emit('open-pull-modal')"
+          class="p-1.5 text-white/30 hover:text-figma-accent hover:bg-figma-accent/5 rounded transition-all active:scale-[0.98]"
+          title="從 GitHub 比對並拉取 (Pull)"
         >
           <Download :size="13" />
         </button>

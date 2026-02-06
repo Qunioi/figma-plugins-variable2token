@@ -1,5 +1,3 @@
-import { computed } from 'vue';
-
 export function useVariableLogic() {
   // 核心配置
   const TYPE_MAP: Record<string, { mapped: string, symbol: string, display: string, preview: string }> = {

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, watch, toRaw } from 'vue';
+import { ref, onMounted, computed, watch } from 'vue';
 import VueJsonPretty from 'vue-json-pretty';
 import 'vue-json-pretty/lib/styles.css';
 import { 
@@ -27,6 +27,7 @@ import Toolbar from './components/Toolbar.vue';
 import Footer from './components/Footer.vue';
 import PushModal from './components/PushModal.vue';
 import GitHubSettingsModal from './components/GitHubSettings.vue';
+import PullConfirmModal from './components/PullConfirmModal.vue';
 import SimpleEditor from './components/SimpleEditor.vue';
 import ContextMenu from './components/ContextMenu.vue';
 import DeleteConfirmModal from './components/DeleteConfirmModal.vue';
@@ -99,6 +100,7 @@ const githubSettings = ref({
   githubBranch: 'main'
 });
 const isPushModalOpen = ref(false);
+const pushModalMode = ref<'push' | 'pull'>('push');
 const isGithubSettingsInAppOpen = ref(false);
 const toastMessage = ref('');
 const showToast = ref(false);
@@ -141,6 +143,15 @@ const deleteModal = ref({
   itemType: 'Collection' as 'Collection' | 'Mode',
   onConfirm: () => {}
 });
+
+const pullConfirm = ref({
+  visible: false,
+  collectionName: '',
+  modeId: '',
+  modeName: '',
+  tokensJson: ''
+});
+const pullSyncKey = ref(0);
 
 const handleContextMenu = (e: MouseEvent, type: 'collection' | 'mode', data: any) => {
   const deleteDisabled = false;
@@ -1328,7 +1339,7 @@ watch(activeCollection, (newCol) => {
 watch([jsonTheme, viewMode, githubSettings, defaultModeByCollection], ([newTheme, newViewMode, newGithub, newDefaultModes]) => {
   if (isInitialLoading.value) return;
   
-  // 使用 toRaw 並進行 JSON 序列化確保移除所有 Proxy 轉為純 JS 物件
+  // 使用 JSON 序列化確保移除所有 Proxy 轉為純 JS 物件
   const settingsToSave = JSON.parse(JSON.stringify({ 
     jsonTheme: newTheme,
     viewMode: newViewMode,
@@ -1357,9 +1368,101 @@ const handleLogout = () => {
   showToastWithTimer('已登出 GitHub 帳號');
 };
 
+const pullFromGithub = async () => {
+  const account = githubSettings.value.githubAccount;
+  const repo = githubSettings.value.githubRepo;
+  const branch = githubSettings.value.githubBranch || 'main';
+  const githubPath = githubSettings.value.githubPath || 'assets/tokens/';
+
+  lastChange.value = null;
+
+  const activeCol = collections.value[activeIndex.value];
+  const activeModeObj = activeCol?.modes?.find((m: any) => m.modeId === activeMode.value);
+
+  if (!activeCol || !activeModeObj) {
+    showToastWithTimer('請先選擇要同步的 Collection 與 Mode');
+    return;
+  }
+
+  if (!account?.token || !repo) {
+    isGithubSettingsInAppOpen.value = true;
+    showToastWithTimer('請先設定 GitHub 連動資訊');
+    return;
+  }
+
+  const filePath = `${githubPath.endsWith('/') ? githubPath : githubPath + '/'}${activeCol.collectionName}/${activeModeObj.name}.tokens.json`.replace(/\/+/g, '/');
+
+  showToastWithTimer('正在從 GitHub 拉取...');
+
+  try {
+    const res = await fetch(`https://api.github.com/repos/${repo}/contents/${filePath}?ref=${branch}`, {
+      headers: { 'Authorization': `token ${account.token}`, 'Accept': 'application/vnd.github.v3+json' }
+    });
+
+    if (res.status !== 200) {
+      showToastWithTimer('找不到遠端檔案或權限不足');
+      return;
+    }
+
+    const data = await res.json();
+    const remoteJson = decodeURIComponent(escape(atob(data.content)));
+
+    parent.postMessage({
+      pluginMessage: {
+        type: 'pull-from-github',
+        collectionName: activeCol.collectionName,
+        modeId: activeModeObj.modeId,
+        tokensJson: remoteJson
+      }
+    }, '*');
+  } catch (error) {
+    console.error('GitHub Pull failed:', error);
+    showToastWithTimer('拉取失敗，請檢查網路或倉庫設定');
+  }
+};
+
+const pullFromGithubPayload = (payload: { collectionName: string; modeId: string; tokensJson: string }) => {
+  if (!payload?.tokensJson) return;
+  lastChange.value = null;
+  showToastWithTimer('正在套用 GitHub 版本...');
+  parent.postMessage({
+    pluginMessage: {
+      type: 'pull-from-github',
+      collectionName: payload.collectionName,
+      modeId: payload.modeId,
+      tokensJson: payload.tokensJson
+    }
+  }, '*');
+};
+
+const openPullConfirm = (payload: { collectionName: string; modeId: string; modeName?: string; tokensJson: string }) => {
+  if (!payload?.tokensJson) return;
+  pullConfirm.value = {
+    visible: true,
+    collectionName: payload.collectionName,
+    modeId: payload.modeId,
+    modeName: payload.modeName || payload.modeId,
+    tokensJson: payload.tokensJson
+  };
+};
+
+const confirmPull = () => {
+  const payload = {
+    collectionName: pullConfirm.value.collectionName,
+    modeId: pullConfirm.value.modeId,
+    tokensJson: pullConfirm.value.tokensJson
+  };
+  pullConfirm.value.visible = false;
+  pullFromGithubPayload(payload);
+  pullSyncKey.value += 1;
+  refresh();
+};
+
 const syncPushToGithub = async (pushData: { message: string, branch: string, tasks: { path: string, content: string, collectionName: string, modeName: string }[] }) => {
   const account = githubSettings.value.githubAccount;
   const { githubRepo } = githubSettings.value;
+
+  lastChange.value = null;
 
   if (!account?.token || !githubRepo || !pushData.tasks.length) {
     if (!account?.token) isGithubSettingsInAppOpen.value = true;
@@ -1410,8 +1513,10 @@ const syncPushToGithub = async (pushData: { message: string, branch: string, tas
   }
 
   if (successCount === total) {
+    lastChange.value = null;
     showToastWithTimer(`成功推送全部 ${total} 個檔案`);
   } else if (successCount > 0) {
+    lastChange.value = null;
     showToastWithTimer(`部分推送成功 (${successCount}/${total})`);
   } else {
     alert('推送失敗，請檢查網路或倉庫設定。');
@@ -1494,7 +1599,8 @@ const syncPushToGithub = async (pushData: { message: string, branch: string, tas
           version="0.1.2" 
           :github-settings="githubSettings"
           @open-github-settings="isGithubSettingsInAppOpen = true"
-          @open-push-modal="isPushModalOpen = true"
+          @open-push-modal="pushModalMode = 'push'; isPushModalOpen = true"
+          @open-pull-modal="pushModalMode = 'pull'; isPushModalOpen = true"
         />
 
     <!-- Resize Handle -->
@@ -1566,8 +1672,19 @@ const syncPushToGithub = async (pushData: { message: string, branch: string, tas
       :github-settings="githubSettings"
       :collections="collections"
       :active-collection-index="activeIndex"
+      :sync-key="pullSyncKey"
+      :mode="pushModalMode"
       @close="isPushModalOpen = false"
       @push="syncPushToGithub"
+      @pull="openPullConfirm"
+    />
+
+    <PullConfirmModal
+      :visible="pullConfirm.visible"
+      :collection-name="pullConfirm.collectionName"
+      :mode-name="pullConfirm.modeName"
+      @close="pullConfirm.visible = false"
+      @confirm="confirmPull"
     />
 
     <!-- Simple Editor for Collections & Modes -->

@@ -737,6 +737,118 @@ figma.ui.onmessage = async (msg) => {
     }
   }
 
+  // 從 GitHub Pull 匯入 Tokens 並同步到指定 Collection/Mode
+  if (msg.type === 'pull-from-github') {
+    const { collectionName, modeId, tokensJson } = msg;
+    try {
+      const collections = await figma.variables.getLocalVariableCollectionsAsync();
+      const targetCol = collections.find(c => c.name === collectionName);
+      if (!targetCol) {
+        figma.notify('找不到對應的 Collection', { error: true });
+        return;
+      }
+
+      const targetMode = targetCol.modes.find(m => m.modeId === modeId);
+      if (!targetMode) {
+        figma.notify('找不到對應的 Mode', { error: true });
+        return;
+      }
+
+      const normalizeTokenType = (t: string) => {
+        const upper = (t || '').toUpperCase();
+        if (upper === 'NUMBER') return 'FLOAT';
+        if (upper === 'COLOR' || upper === 'FLOAT' || upper === 'STRING' || upper === 'BOOLEAN') return upper;
+        return 'STRING';
+      };
+
+      const isAliasValue = (val: any) => typeof val === 'string' && /^\{.+\}$/.test(val.trim());
+
+      const parseTokenValue = (val: any, type: string) => {
+        const upper = (type || '').toUpperCase();
+        if (upper === 'COLOR' && typeof val === 'string') return parseToFigmaColor(val);
+        if (upper === 'FLOAT' || upper === 'NUMBER') return isNaN(Number(val)) ? 0 : Number(val);
+        if (upper === 'BOOLEAN') return val === true || val === 1 || val === 'true';
+        return val ?? '';
+      };
+
+      const tokenEntries: Array<{ name: string; type: string; value: any; description?: string }> = [];
+      if (typeof tokensJson === 'string' && tokensJson.trim().length > 0) {
+        try {
+          const data = JSON.parse(tokensJson);
+          const walk = (node: any, path: string[] = []) => {
+            if (!node || typeof node !== 'object') return;
+            for (const [key, val] of Object.entries(node)) {
+              if (key.startsWith('$')) continue;
+              const currentPath = [...path, key];
+              if (val && typeof val === 'object' && (('value' in (val as any)) || ('$value' in (val as any)))) {
+                tokenEntries.push({
+                  name: currentPath.join('/'),
+                  type: String((val as any).type || (val as any).$type || 'string'),
+                  value: (val as any).value !== undefined ? (val as any).value : (val as any).$value,
+                  description: (val as any).description || (val as any).$description
+                });
+              } else {
+                walk(val, currentPath);
+              }
+            }
+          };
+          walk(data, []);
+        } catch (err) {
+          console.error('Failed to parse tokensJson:', err);
+          figma.notify('Tokens 解析失敗', { error: true });
+          return;
+        }
+      }
+
+      const allLocalVariables = await figma.variables.getLocalVariablesAsync();
+      const targetVariables = allLocalVariables.filter(v => v.variableCollectionId === targetCol.id);
+
+      // Pass 1: ensure variables exist
+      for (const entry of tokenEntries) {
+        try {
+          const tType = normalizeTokenType(entry.type);
+          let tVar = targetVariables.find(v => v.name === entry.name && v.resolvedType === tType);
+          if (!tVar) {
+            tVar = createVariableCompat(entry.name, targetCol, tType as VariableResolvedDataType);
+            tVar.description = entry.description || '';
+            targetVariables.push(tVar);
+          }
+        } catch (err) {
+          console.error(`Failed to create variable during pull:`, err);
+        }
+      }
+
+      // Pass 2: set values / aliases
+      for (const entry of tokenEntries) {
+        try {
+          const tType = normalizeTokenType(entry.type);
+          const tVar = targetVariables.find(v => v.name === entry.name && v.resolvedType === tType);
+          if (!tVar) continue;
+
+          if (isAliasValue(entry.value) && tType !== 'STRING') {
+            const aliasName = entry.value.replace(/^\{|\}$/g, '');
+            const aliasTarget = targetVariables.find(v => v.name === aliasName);
+            if (aliasTarget) {
+              tVar.setValueForMode(modeId, { type: 'VARIABLE_ALIAS', id: aliasTarget.id } as any);
+            }
+            continue;
+          }
+
+          const parsed = parseTokenValue(entry.value, tType);
+          tVar.setValueForMode(modeId, parsed);
+        } catch (err) {
+          console.error(`Failed to set value during pull:`, err);
+        }
+      }
+
+      await refreshVariables();
+      figma.notify(`已從 GitHub 同步 ${collectionName} / ${targetMode.name}`);
+    } catch (e) {
+      console.error('Failed to pull tokens from GitHub:', e);
+      figma.notify('GitHub Pull 失敗', { error: true });
+    }
+  }
+
   // 複製 Collection
   if (msg.type === 'duplicate-collection') {
     const { sourceName, newName } = msg;

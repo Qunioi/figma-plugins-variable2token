@@ -14,7 +14,8 @@ import {
   AlertCircle,
   Loader2,
   ArrowLeft,
-  Search
+  Search,
+  Download
 } from 'lucide-vue-next';
 
 interface Mode {
@@ -42,18 +43,22 @@ interface Props {
   };
   collections: Collection[];
   activeCollectionIndex: number;
+  syncKey?: number;
+  mode?: 'push' | 'pull';
 }
 
 import { useVariableLogic } from '../../composables/useVariableLogic';
 
 const props = defineProps<Props>();
-const emit = defineEmits(['close', 'push']);
+const emit = defineEmits(['close', 'push', 'pull']);
 
 const { getMappedType, serializeJson } = useVariableLogic();
 
 const activeTab = ref<'files' | 'commit' | 'diff'>('files');
 const commitMessage = ref('從 Figma 更新變數 Token');
+const isCommitEdited = ref(false);
 const branch = ref(props.githubSettings.githubBranch || 'main');
+const lastCommit = ref<{ message: string; author: string; date: string } | null>(null);
 
 // 選中的檔案狀態
 const selectedFiles = ref<Record<string, string[]>>({});
@@ -63,20 +68,32 @@ const collapsedCollections = ref<Set<string>>(new Set());
 const isCheckingRemote = ref(false);
 const remoteContents = ref<Record<string, string>>({}); // path -> content
 const diffResults = ref<Record<string, { type: 'new' | 'diff' | 'identical' }>>({});
-const activeDiffFile = ref<{ path: string, local: string, remote: string } | null>(null);
+const activeDiffFile = ref<{ path: string, local: string, remote: string, collectionName: string, modeId: string, modeName: string } | null>(null);
 
-// 初始預選
+const modalTitle = computed(() => props.mode === 'pull' ? 'Pull from GitHub' : 'Push to GitHub');
+
 onMounted(() => {
-  const activeCol = props.collections[props.activeCollectionIndex];
-  if (activeCol) {
-    selectedFiles.value[activeCol.collectionName] = activeCol.modes.map(m => m.modeId);
-  }
+  selectedFiles.value = {};
   checkForChanges();
+  fetchLatestCommit();
+  commitMessage.value = suggestedCommit.value;
 });
 
 // 當分支改變時重新檢查
 watch(branch, () => {
   checkForChanges();
+  fetchLatestCommit();
+});
+
+watch(() => props.syncKey, () => {
+  checkForChanges();
+});
+
+watch(() => props.visible, (visible) => {
+  if (visible) {
+    selectedFiles.value = {};
+    fetchLatestCommit();
+  }
 });
 
 const getFinalPath = (colName: string, modeName: string) => {
@@ -86,8 +103,105 @@ const getFinalPath = (colName: string, modeName: string) => {
   return `${githubPath.endsWith('/') ? githubPath : githubPath + '/'}${collectionPath}/${fileName}`.replace(/\/+/g, '/');
 };
 
+const getStatusByPath = (path: string) => {
+  return diffResults.value[path] || { type: 'new' as const };
+};
+
 const getLocalContent = (col: Collection, modeId: string) => {
   return serializeJson(col.variables, modeId);
+};
+
+const pruneSyncedSelections = () => {
+  const nextSelected: Record<string, string[]> = {};
+  props.collections.forEach(col => {
+    const selected = selectedFiles.value[col.collectionName] || [];
+    const next = selected.filter(modeId => {
+      const mode = col.modes.find(m => m.modeId === modeId);
+      if (!mode) return false;
+      const status = getStatusByPath(getFinalPath(col.collectionName, mode.name));
+      return status.type !== 'identical';
+    });
+    if (next.length > 0) nextSelected[col.collectionName] = next;
+  });
+  selectedFiles.value = nextSelected;
+};
+
+const selectDiffFiles = () => {
+  const nextSelected: Record<string, string[]> = {};
+  props.collections.forEach(col => {
+    const diffModes = col.modes
+      .filter(m => getStatusByPath(getFinalPath(col.collectionName, m.name)).type === 'diff')
+      .map(m => m.modeId);
+    if (diffModes.length > 0) nextSelected[col.collectionName] = diffModes;
+  });
+  selectedFiles.value = nextSelected;
+};
+
+const fetchLatestCommit = async () => {
+  const token = props.githubSettings.githubAccount?.token;
+  const repo = props.githubSettings.githubRepo;
+  const targetBranch = branch.value || props.githubSettings.githubBranch || 'main';
+
+  if (!token || !repo || !targetBranch) {
+    lastCommit.value = null;
+    return;
+  }
+
+  try {
+    const res = await fetch(`https://api.github.com/repos/${repo}/commits/${targetBranch}`, {
+      headers: { 'Authorization': `token ${token}`, 'Accept': 'application/vnd.github.v3+json' }
+    });
+
+    if (res.status !== 200) {
+      lastCommit.value = null;
+      return;
+    }
+
+    const data = await res.json();
+    const commit = data?.commit;
+    lastCommit.value = commit ? {
+      message: commit.message || '',
+      author: commit.author?.name || 'Unknown',
+      date: commit.author?.date || ''
+    } : null;
+  } catch (e) {
+    lastCommit.value = null;
+  }
+};
+
+const normalizeTokensJson = (raw: string) => {
+  try {
+    const data = JSON.parse(raw);
+    const walk = (node: any): any => {
+      if (!node || typeof node !== 'object') return node;
+      const result: any = Array.isArray(node) ? [] : {};
+      for (const [key, val] of Object.entries(node)) {
+        if (key.startsWith('$')) continue;
+        if (val && typeof val === 'object') {
+          const vObj = val as any;
+          if ('value' in vObj || '$value' in vObj) {
+            result[key] = {
+              value: 'value' in vObj ? vObj.value : vObj.$value,
+              type: 'type' in vObj ? vObj.type : vObj.$type
+            };
+            if ('description' in vObj || '$description' in vObj) {
+              const desc = 'description' in vObj ? vObj.description : vObj.$description;
+              if (desc) result[key].description = desc;
+            }
+          } else {
+            result[key] = walk(vObj);
+          }
+        } else {
+          result[key] = val;
+        }
+      }
+      return result;
+    };
+
+    return JSON.stringify(walk(data), null, 2);
+  } catch (e) {
+    return raw;
+  }
 };
 
 const checkForChanges = async () => {
@@ -112,7 +226,8 @@ const checkForChanges = async () => {
         
         if (res.status === 200) {
           const data = await res.json();
-          const remoteJson = decodeURIComponent(escape(atob(data.content)));
+          const remoteRaw = decodeURIComponent(escape(atob(data.content)));
+          const remoteJson = normalizeTokensJson(remoteRaw);
           newRemoteContents[path] = remoteJson;
           
           if (remoteJson === localJson) {
@@ -131,6 +246,7 @@ const checkForChanges = async () => {
   
   remoteContents.value = newRemoteContents;
   diffResults.value = newDiffResults;
+  selectDiffFiles();
   isCheckingRemote.value = false;
 };
 
@@ -142,7 +258,10 @@ const openDiff = (col: Collection, mode: Mode) => {
   activeDiffFile.value = {
     path: path,
     local: getLocalContent(col, mode.modeId),
-    remote: remoteContents.value[path] || ''
+    remote: remoteContents.value[path] || '',
+    collectionName: col.collectionName,
+    modeId: mode.modeId,
+    modeName: mode.name
   };
   activeTab.value = 'diff';
 };
@@ -156,6 +275,12 @@ const toggleFolder = (name: string) => {
 };
 
 const toggleMode = (colName: string, modeId: string) => {
+  const col = props.collections.find(c => c.collectionName === colName);
+  const mode = col?.modes.find(m => m.modeId === modeId);
+  if (col && mode) {
+    const status = getStatusByPath(getFinalPath(colName, mode.name));
+    if (status.type === 'identical') return;
+  }
   if (!selectedFiles.value[colName]) {
     selectedFiles.value[colName] = [];
   }
@@ -168,18 +293,22 @@ const toggleMode = (colName: string, modeId: string) => {
 };
 
 const toggleCollection = (col: Collection) => {
+  const selectableModes = col.modes.filter(m => getStatusByPath(getFinalPath(col.collectionName, m.name)).type !== 'identical');
+  if (selectableModes.length === 0) return;
   const currentSelected = selectedFiles.value[col.collectionName] || [];
-  if (currentSelected.length === col.modes.length) {
+  if (currentSelected.length === selectableModes.length) {
     selectedFiles.value[col.collectionName] = [];
   } else {
-    selectedFiles.value[col.collectionName] = col.modes.map(m => m.modeId);
+    selectedFiles.value[col.collectionName] = selectableModes.map(m => m.modeId);
   }
 };
 
 const getCollectionState = (col: Collection) => {
+  const selectableModes = col.modes.filter(m => getStatusByPath(getFinalPath(col.collectionName, m.name)).type !== 'identical');
   const selected = selectedFiles.value[col.collectionName] || [];
+  if (selectableModes.length === 0) return 'none';
   if (selected.length === 0) return 'none';
-  if (selected.length === col.modes.length) return 'all';
+  if (selected.length === selectableModes.length) return 'all';
   return 'some';
 };
 
@@ -189,12 +318,86 @@ const isModeSelected = (colName: string, modeId: string) => {
 
 const getDiffStatus = (colName: string, modeName: string) => {
   const path = getFinalPath(colName, modeName);
-  return diffResults.value[path] || { type: 'new' };
+  return getStatusByPath(path);
+};
+
+const handlePull = async (col: Collection, mode: Mode) => {
+  const path = getFinalPath(col.collectionName, mode.name);
+
+  let remote = remoteContents.value[path];
+  if (!remote) {
+    const token = props.githubSettings.githubAccount?.token;
+    const repo = props.githubSettings.githubRepo;
+    const targetBranch = branch.value || props.githubSettings.githubBranch || 'main';
+
+    if (!token || !repo) return;
+
+    try {
+      const res = await fetch(`https://api.github.com/repos/${repo}/contents/${path}?ref=${targetBranch}`, {
+        headers: { 'Authorization': `token ${token}`, 'Accept': 'application/vnd.github.v3+json' }
+      });
+
+      if (res.status !== 200) return;
+
+      const data = await res.json();
+      remote = decodeURIComponent(escape(atob(data.content)));
+      remoteContents.value[path] = remote;
+    } catch (e) {
+      console.error('Failed to fetch remote content for pull:', e);
+      return;
+    }
+  }
+
+  if (!remote) return;
+
+  emit('pull', {
+    collectionName: col.collectionName,
+    modeId: mode.modeId,
+    tokensJson: remote,
+    modeName: mode.name
+  });
+};
+
+const handlePullFromDiff = () => {
+  if (!activeDiffFile.value) return;
+  handlePull(
+    { collectionName: activeDiffFile.value.collectionName, modes: [{ modeId: activeDiffFile.value.modeId, name: activeDiffFile.value.modeName }], variables: [] },
+    { modeId: activeDiffFile.value.modeId, name: activeDiffFile.value.modeName }
+  );
 };
 
 const totalSelectedCount = computed(() => {
   return Object.values(selectedFiles.value).reduce((sum, modes) => sum + modes.length, 0);
 });
+
+const suggestedCommit = computed(() => {
+  const parts: string[] = [];
+  props.collections.forEach(col => {
+    const selected = selectedFiles.value[col.collectionName] || [];
+    if (selected.length === 0) return;
+    const modeNames = selected
+      .map(id => col.modes.find(m => m.modeId === id)?.name)
+      .filter(Boolean) as string[];
+    if (modeNames.length > 0) {
+      parts.push(`${col.collectionName}(${modeNames.join(', ')})`);
+    }
+  });
+
+  if (parts.length === 0) return '從 Figma 更新變數 Token';
+  return `更新 tokens：${parts.join('; ')}`;
+});
+
+watch(commitMessage, (val) => {
+  if (val !== suggestedCommit.value) {
+    isCommitEdited.value = true;
+  }
+});
+
+watch([selectedFiles, diffResults], () => {
+  if (!isCommitEdited.value) {
+    commitMessage.value = suggestedCommit.value;
+  }
+}, { deep: true });
 
 const hasActualChangesSelected = computed(() => {
   let hasChanges = false;
@@ -274,7 +477,7 @@ const handlePush = () => {
         <!-- 標題 -->
         <div class="flex items-center justify-between px-4 py-3 border-b border-white/5 bg-white/5">
           <div class="flex items-center gap-2">
-            <span class="text-[13px] font-bold font-mono">Push to GitHub</span>
+            <span class="text-[13px] font-bold font-mono">{{ modalTitle }}</span>
           </div>
           <button @click="$emit('close')" class="p-1 hover:bg-white/10 rounded-md transition-colors">
             <X :size="16" class="text-white/40" />
@@ -327,24 +530,42 @@ const handlePush = () => {
               <!-- Modes -->
               <div v-if="!collapsedCollections.has(col.collectionName)" class="ml-6 flex flex-col gap-0.5 mt-0.5 border-l border-white/5 pl-2">
                 <div v-for="mode in col.modes" :key="mode.modeId" @click="toggleMode(col.collectionName, mode.modeId)"
-                  class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-white/5 transition-colors cursor-pointer group"
+                  class="flex items-center gap-3 px-3 py-2 rounded-lg transition-colors cursor-pointer group"
+                  :class="getDiffStatus(col.collectionName, mode.name).type === 'identical' ? 'opacity-40 cursor-not-allowed' : 'hover:bg-white/5'"
                 >
                   <div class="w-4 h-4 rounded border flex items-center justify-center transition-all bg-black/40 shrink-0"
-                    :class="isModeSelected(col.collectionName, mode.modeId) ? 'bg-white border-white' : 'border-white/10 group-hover:border-white/20'">
+                    :class="[
+                      isModeSelected(col.collectionName, mode.modeId) ? 'bg-white border-white' : 'border-white/10 group-hover:border-white/20',
+                      getDiffStatus(col.collectionName, mode.name).type === 'identical' ? 'opacity-40' : ''
+                    ]">
                     <Check v-if="isModeSelected(col.collectionName, mode.modeId)" :size="10" class="text-black" strokeWidth="4" />
                   </div>
                   <FileJson :size="14" class="opacity-50" />
                   <span class="text-[12px] flex-1" :class="isModeSelected(col.collectionName, mode.modeId) ? 'text-white' : 'text-white/40'">{{ mode.name }}</span>
                   
-                  <div @click.stop="openDiff(col, mode)"
-                    class="px-1.5 py-0.5 rounded text-[8px] font-bold uppercase tracking-wide transition-all translate-y-0 active:translate-y-px"
-                    :class="{
-                      'bg-green-500/10 text-green-400 border border-green-500/20 cursor-pointer hover:bg-green-500/20': getDiffStatus(col.collectionName, mode.name).type === 'new',
-                      'bg-amber-500/10 text-red-400 border border-amber-500/20 cursor-pointer hover:bg-amber-500/20': getDiffStatus(col.collectionName, mode.name).type === 'diff',
-                      'bg-white/5 text-white/20 pointer-events-none': getDiffStatus(col.collectionName, mode.name).type === 'identical'
-                    }"
-                  >
-                    {{ getDiffStatus(col.collectionName, mode.name).type === 'identical' ? 'Synced' : getDiffStatus(col.collectionName, mode.name).type }}
+                  <div class="flex items-center gap-2">
+                    <button
+                      v-if="getDiffStatus(col.collectionName, mode.name).type === 'diff'"
+                      @click.stop="handlePull(col, mode)"
+                      class="px-1.5 py-0.5 rounded text-[8px] font-bold uppercase tracking-wide transition-all translate-y-0 active:translate-y-px bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 hover:bg-indigo-500/20"
+                      title="套用遠端版本"
+                    >
+                      <span class="inline-flex items-center gap-1">
+                        <Download :size="10" /> Pull
+                      </span>
+                    </button>
+                    <div
+                      v-if="getDiffStatus(col.collectionName, mode.name).type !== 'new' || props.mode === 'pull'"
+                      @click.stop="openDiff(col, mode)"
+                      class="px-1.5 py-0.5 rounded text-[8px] font-bold uppercase tracking-wide transition-all translate-y-0 active:translate-y-px"
+                      :class="{
+                        'bg-green-500/10 text-green-400 border border-green-500/20 cursor-pointer hover:bg-green-500/20': getDiffStatus(col.collectionName, mode.name).type === 'new',
+                        'bg-amber-500/10 text-red-400 border border-amber-500/20 cursor-pointer hover:bg-amber-500/20': getDiffStatus(col.collectionName, mode.name).type === 'diff',
+                        'bg-white/5 text-white/20 pointer-events-none': getDiffStatus(col.collectionName, mode.name).type === 'identical'
+                      }"
+                    >
+                      {{ getDiffStatus(col.collectionName, mode.name).type === 'identical' ? 'Synced' : getDiffStatus(col.collectionName, mode.name).type }}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -368,7 +589,11 @@ const handlePush = () => {
               <label class="text-[10px] font-bold text-white/60 uppercase tracking-widest px-1">Branch</label>
               <div class="relative">
                 <GitBranch :size="14" class="absolute left-3 top-1/2 -translate-y-1/2 opacity-50" />
-                <input v-model="branch" class="w-full bg-black/40 border border-white/10 rounded-lg pl-9 pr-3 py-2 text-[12px] focus:border-figma-accent/50 focus:outline-none" />
+                <input 
+                  v-model="branch" 
+                  class="w-full bg-black/40 border border-white/10 rounded-lg pl-9 pr-3 py-2 text-[12px] focus:border-figma-accent/50 focus:outline-none" 
+                  :title="lastCommit ? `Last commit: ${lastCommit.message}\nBy: ${lastCommit.author}\nAt: ${lastCommit.date}` : ''"
+                />
               </div>
             </div>
           </div>
@@ -382,6 +607,15 @@ const handlePush = () => {
                 </button>
                 <span class="text-white/40 uppercase font-bold tracking-widest text-[9px]">DIFFERENCE:</span>
                 <span class="text-indigo-400 font-mono">{{ activeDiffFile.path.split('/').pop() }}</span>
+                <button
+                  @click="handlePullFromDiff"
+                  class="ml-2 px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wide transition-all bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 hover:bg-indigo-500/20"
+                  title="套用遠端版本"
+                >
+                  <span class="inline-flex items-center gap-1">
+                    <Download :size="10" /> Pull
+                  </span>
+                </button>
               </div>
               <div class="flex gap-4 text-[9px] uppercase font-bold">
                  <div class="flex items-center gap-1.5 text-red-400/60"><div class="w-2 h-2 bg-red-500/20 border border-red-500/40 rounded-sm"></div> REMOTE</div>
