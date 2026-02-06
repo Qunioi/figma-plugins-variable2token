@@ -1347,6 +1347,10 @@ watch([jsonTheme, viewMode, githubSettings, defaultModeByCollection], ([newTheme
     ...newGithub
   }));
 
+  if (settingsToSave.githubAccount?.token) {
+    delete settingsToSave.githubAccount.token;
+  }
+
   parent.postMessage({ 
     pluginMessage: { 
       type: 'save-settings', 

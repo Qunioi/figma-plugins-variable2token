@@ -555,7 +555,7 @@ const handlePush = () => {
                       </span>
                     </button>
                     <div
-                      v-if="getDiffStatus(col.collectionName, mode.name).type !== 'new' || props.mode === 'pull'"
+                      v-if="getDiffStatus(col.collectionName, mode.name).type !== 'new' || (props.mode === 'push' && !isCheckingRemote)"
                       @click.stop="openDiff(col, mode)"
                       class="px-1.5 py-0.5 rounded text-[8px] font-bold uppercase tracking-wide transition-all translate-y-0 active:translate-y-px"
                       :class="{
