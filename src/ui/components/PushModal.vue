@@ -58,7 +58,7 @@ const collapsedCollections = ref<Set<string>>(new Set());
 // --- Diff 相關狀態 ---
 const isCheckingRemote = ref(false);
 const remoteContents = ref<Record<string, string>>({}); // path -> content
-const diffResults = ref<Record<string, { type: 'new' | 'changed' | 'identical' }>>({});
+const diffResults = ref<Record<string, { type: 'new' | 'diff' | 'identical' }>>({});
 const activeDiffFile = ref<{ path: string, local: string, remote: string } | null>(null);
 
 // 初始預選
@@ -128,7 +128,7 @@ const checkForChanges = async () => {
           if (remoteJson === localJson) {
             newDiffResults[path] = { type: 'identical' };
           } else {
-            newDiffResults[path] = { type: 'changed' };
+            newDiffResults[path] = { type: 'diff' };
           }
         } else {
           newDiffResults[path] = { type: 'new' };
@@ -326,11 +326,11 @@ const handlePush = () => {
                   <ChevronRight v-else :size="14" class="text-white/20 group-hover:text-white/60" />
                 </div>
                 <div @click.stop="toggleCollection(col)" class="w-4 h-4 rounded border flex items-center justify-center transition-all bg-black/40"
-                  :class="getCollectionState(col) !== 'none' ? 'bg-indigo-500 border-indigo-500' : 'border-white/10 group-hover:border-white/20'">
+                  :class="getCollectionState(col) !== 'none' ? 'bg-white border-white' : 'border-white/10 group-hover:border-white/20'">
                   <Check v-if="getCollectionState(col) === 'all'" :size="10" class="text-black" strokeWidth="4" />
                   <Minus v-else-if="getCollectionState(col) === 'some'" :size="10" class="text-black" strokeWidth="4" />
                 </div>
-                <Folder :size="14" class="text-indigo-400/60" />
+                <Folder :size="14" class="text-white/60" />
                 <span class="text-[12px] font-medium text-white/80">{{ col.collectionName }}</span>
               </div>
 
@@ -340,17 +340,17 @@ const handlePush = () => {
                   class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-white/5 transition-colors cursor-pointer group"
                 >
                   <div class="w-4 h-4 rounded border flex items-center justify-center transition-all bg-black/40 shrink-0"
-                    :class="isModeSelected(col.collectionName, mode.modeId) ? 'bg-indigo-500 border-indigo-500' : 'border-white/10 group-hover:border-white/20'">
+                    :class="isModeSelected(col.collectionName, mode.modeId) ? 'bg-white border-white' : 'border-white/10 group-hover:border-white/20'">
                     <Check v-if="isModeSelected(col.collectionName, mode.modeId)" :size="10" class="text-black" strokeWidth="4" />
                   </div>
-                  <FileJson :size="14" class="text-white/20" />
+                  <FileJson :size="14" class="opacity-50" />
                   <span class="text-[12px] flex-1" :class="isModeSelected(col.collectionName, mode.modeId) ? 'text-white' : 'text-white/40'">{{ mode.name }}</span>
                   
                   <div @click.stop="openDiff(col, mode)"
                     class="px-1.5 py-0.5 rounded text-[8px] font-bold uppercase tracking-wide transition-all translate-y-0 active:translate-y-px"
                     :class="{
                       'bg-green-500/10 text-green-400 border border-green-500/20 cursor-pointer hover:bg-green-500/20': getDiffStatus(col.collectionName, mode.name).type === 'new',
-                      'bg-amber-500/10 text-amber-400 border border-amber-500/20 cursor-pointer hover:bg-amber-500/20': getDiffStatus(col.collectionName, mode.name).type === 'changed',
+                      'bg-amber-500/10 text-red-400 border border-amber-500/20 cursor-pointer hover:bg-amber-500/20': getDiffStatus(col.collectionName, mode.name).type === 'diff',
                       'bg-white/5 text-white/20 pointer-events-none': getDiffStatus(col.collectionName, mode.name).type === 'identical'
                     }"
                   >
@@ -364,21 +364,21 @@ const handlePush = () => {
           <!-- 2. 提交資訊 -->
           <div v-if="activeTab === 'commit'" class="flex-1 p-5 flex flex-col gap-6 animate-in slide-in-from-bottom-2 duration-300">
              <div class="space-y-2">
-              <label class="text-[10px] font-bold text-indigo-400/60 uppercase tracking-widest px-1">Repo Target</label>
-              <div class="bg-indigo-500/5 border border-indigo-500/10 px-3 py-2.5 rounded-lg text-[12px] flex items-center gap-2">
+              <label class="text-[10px] font-bold text-white/60 uppercase tracking-widest px-1">Repo Target</label>
+              <div class="bg-figma-accent/5 border border-figma-accent/10 px-3 py-2.5 rounded-lg text-[12px] flex items-center gap-2">
                 <Github :size="14" class="opacity-50" />
                 {{ githubSettings.githubRepo }}
               </div>
             </div>
             <div class="space-y-2">
-              <label class="text-[10px] font-bold text-indigo-400/60 uppercase tracking-widest px-1">Commit Message</label>
-              <textarea v-model="commitMessage" class="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2.5 text-[12px] focus:border-indigo-500/50 focus:outline-none min-h-[120px] resize-none"></textarea>
+              <label class="text-[10px] font-bold text-white/60 uppercase tracking-widest px-1">Commit Message</label>
+              <textarea v-model="commitMessage" class="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2.5 text-[12px] focus:border-figma-accent/50 focus:outline-none min-h-[120px] resize-none"></textarea>
             </div>
             <div class="space-y-2">
-              <label class="text-[10px] font-bold text-indigo-400/60 uppercase tracking-widest px-1">Branch</label>
+              <label class="text-[10px] font-bold text-white/60 uppercase tracking-widest px-1">Branch</label>
               <div class="relative">
-                <GitBranch :size="14" class="absolute left-3 top-1/2 -translate-y-1/2 text-white/30" />
-                <input v-model="branch" class="w-full bg-black/40 border border-white/10 rounded-lg pl-9 pr-3 py-2 text-[12px] focus:border-indigo-500/50 focus:outline-none" />
+                <GitBranch :size="14" class="absolute left-3 top-1/2 -translate-y-1/2 opacity-50" />
+                <input v-model="branch" class="w-full bg-black/40 border border-white/10 rounded-lg pl-9 pr-3 py-2 text-[12px] focus:border-figma-accent/50 focus:outline-none" />
               </div>
             </div>
           </div>
@@ -436,7 +436,7 @@ const handlePush = () => {
               v-if="activeTab !== 'diff'"
               @click="handlePush"
               :disabled="totalSelectedCount === 0 || (!hasActualChangesSelected)"
-              class="bg-indigo-500 text-black px-6 py-2 rounded-lg text-[12px] font-bold hover:brightness-110 active:scale-[0.98] transition-all flex items-center gap-2 shadow-lg shadow-indigo-500/20 disabled:opacity-20 disabled:grayscale"
+              class="bg-white/10 text-white px-6 py-2 rounded-lg text-[12px] font-bold hover:bg-white/20 active:scale-[0.98] transition-all flex items-center gap-2 disabled:opacity-20 disabled:grayscale"
             >
               <CloudUpload :size="16" />
               Confirm & Push
