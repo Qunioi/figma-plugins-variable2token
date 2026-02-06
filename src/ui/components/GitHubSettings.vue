@@ -153,6 +153,9 @@ const handleSaveRepo = () => {
                   <div class="w-6 h-6 rounded-full bg-figma-accent/20 text-figma-accent flex items-center justify-center text-[12px] font-bold shrink-0">2</div>
                   <div class="flex-1">
                     <div class="text-[12px] font-medium">貼上並進行連動</div>
+                    <div class="text-[10px] text-white/40 mt-1">
+                      建議使用 Fine-grained PAT，僅授權目標 repo 的 Contents 讀寫權限。
+                    </div>
                     <div class="flex gap-2 mt-2">
                        <input 
                         v-model="inputToken"

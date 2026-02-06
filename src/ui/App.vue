@@ -1226,6 +1226,18 @@ onMounted(() => {
         if (msg.settings.githubRepo) savedGithub.githubRepo = msg.settings.githubRepo;
         if (msg.settings.githubPath) savedGithub.githubPath = msg.settings.githubPath;
         if (msg.settings.githubBranch) savedGithub.githubBranch = msg.settings.githubBranch;
+
+        try {
+          const sessionToken = sessionStorage.getItem('v2t_github_token');
+          if (sessionToken && savedGithub.githubAccount && !savedGithub.githubAccount.token) {
+            savedGithub.githubAccount = {
+              ...savedGithub.githubAccount,
+              token: sessionToken
+            };
+          }
+        } catch (e) {
+          // ignore sessionStorage errors
+        }
         
         githubSettings.value = savedGithub;
       }
@@ -1351,6 +1363,10 @@ watch([jsonTheme, viewMode, githubSettings, defaultModeByCollection], ([newTheme
     delete settingsToSave.githubAccount.token;
   }
 
+  if (settingsToSave.githubAccount?.token) {
+    delete settingsToSave.githubAccount.token;
+  }
+
   parent.postMessage({ 
     pluginMessage: { 
       type: 'save-settings', 
@@ -1360,6 +1376,13 @@ watch([jsonTheme, viewMode, githubSettings, defaultModeByCollection], ([newTheme
 }, { deep: true });
 
 const updateGithubSettings = (newSettings: any) => {
+  if (newSettings?.githubAccount?.token) {
+    try {
+      sessionStorage.setItem('v2t_github_token', newSettings.githubAccount.token);
+    } catch (e) {
+      // ignore sessionStorage errors
+    }
+  }
   githubSettings.value = { 
     ...githubSettings.value,
     ...newSettings 
@@ -1368,6 +1391,11 @@ const updateGithubSettings = (newSettings: any) => {
 };
 
 const handleLogout = () => {
+  try {
+    sessionStorage.removeItem('v2t_github_token');
+  } catch (e) {
+    // ignore sessionStorage errors
+  }
   githubSettings.value.githubAccount = undefined;
   showToastWithTimer('已登出 GitHub 帳號');
 };

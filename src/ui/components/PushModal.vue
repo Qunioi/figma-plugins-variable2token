@@ -71,6 +71,7 @@ const diffResults = ref<Record<string, { type: 'new' | 'diff' | 'identical' }>>(
 const activeDiffFile = ref<{ path: string, local: string, remote: string, collectionName: string, modeId: string, modeName: string } | null>(null);
 
 const modalTitle = computed(() => props.mode === 'pull' ? 'Pull from GitHub' : 'Push to GitHub');
+const hasGithubAuth = computed(() => !!props.githubSettings.githubAccount?.token && !!props.githubSettings.githubRepo);
 
 onMounted(() => {
   selectedFiles.value = {};
@@ -93,6 +94,12 @@ watch(() => props.visible, (visible) => {
   if (visible) {
     selectedFiles.value = {};
     fetchLatestCommit();
+  }
+});
+
+watch(() => props.mode, (mode) => {
+  if (mode === 'pull' && activeTab.value === 'commit') {
+    activeTab.value = 'files';
   }
 });
 
@@ -494,6 +501,7 @@ const handlePush = () => {
             選擇變數集合 ({{ totalSelectedCount }})
           </button>
           <button 
+            v-if="props.mode === 'push'"
             @click="activeTab = 'commit'"
             class="px-4 py-1.5 text-[11px] font-medium rounded-t-lg transition-all border-b-2"
             :class="activeTab === 'commit' ? 'text-figma-accent border-figma-accent bg-figma-accent/5' : 'text-white/40 border-transparent hover:text-white/60'"
@@ -511,7 +519,10 @@ const handlePush = () => {
         <div class="flex flex-col min-h-[300px] max-h-[calc(100vh-120px)] overflow-hidden">
           
           <!-- 1. 檔案清單 -->
-          <div v-if="activeTab === 'files'" class="flex-1 overflow-y-auto p-2 flex flex-col custom-scrollbar bg-black/10">
+          <div v-if="activeTab === 'files'" class="flex-1 overflow-y-auto p-2 flex flex-col custom-scrollbar bg-black/10" :class="!hasGithubAuth ? 'opacity-40 pointer-events-none' : ''">
+            <div v-if="!hasGithubAuth" class="px-3 py-2 text-[11px] text-white/50">
+              請先完成 GitHub 連動與倉庫設定
+            </div>
             <div v-for="col in collections" :key="col.collectionName" class="mb-1">
               <div class="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-white/5 transition-colors group cursor-pointer" @click="toggleFolder(col.collectionName)">
                 <div class="w-4 h-4 flex items-center justify-center">
@@ -573,7 +584,7 @@ const handlePush = () => {
           </div>
 
           <!-- 2. 提交資訊 -->
-          <div v-if="activeTab === 'commit'" class="flex-1 p-5 flex flex-col gap-6 animate-in slide-in-from-bottom-2 duration-300">
+          <div v-if="activeTab === 'commit' && props.mode === 'push'" class="flex-1 p-5 flex flex-col gap-6 animate-in slide-in-from-bottom-2 duration-300">
              <div class="space-y-2">
               <label class="text-[10px] font-bold text-white/60 uppercase tracking-widest px-1">Repo Target</label>
               <div class="bg-figma-accent/5 border border-figma-accent/10 px-3 py-2.5 rounded-lg text-[12px] flex items-center gap-2">
@@ -657,9 +668,9 @@ const handlePush = () => {
           <div class="flex gap-2">
             <button @click="$emit('close')" class="px-4 py-2 rounded-lg text-[11px] font-bold text-white/40 hover:bg-white/5 transition-all active:scale-[0.98]">Cancel</button>
             <button 
-              v-if="activeTab !== 'diff'"
+              v-if="activeTab !== 'diff' && props.mode === 'push'"
               @click="handlePush"
-              :disabled="totalSelectedCount === 0 || (!hasActualChangesSelected)"
+              :disabled="totalSelectedCount === 0 || (!hasActualChangesSelected) || !hasGithubAuth"
               class="bg-figma-accent text-black/70 px-6 py-2 rounded-lg text-[12px] font-bold hover:bg-figma-accent/80 active:scale-[0.98] transition-all flex items-center gap-2 disabled:opacity-20 disabled:grayscale"
             >
               <CloudUpload :size="16" />
