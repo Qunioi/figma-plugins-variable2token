@@ -10,6 +10,7 @@ import {
   Settings2,
 } from 'lucide-vue-next';
 import { useColorConversion } from '../composables/useColorConversion';
+import { useVariableLogic } from '../composables/useVariableLogic';
 import type { 
   Variable, 
   Collection, 
@@ -41,6 +42,8 @@ const {
   hslaToRgba 
 } = useColorConversion();
 
+const { getMappedType } = useVariableLogic();
+
 // --- Demo Data Imports ---
 const demoFiles = import.meta.glob('../demo/**/*.tokens.json', { eager: true });
 
@@ -67,11 +70,11 @@ const collections = ref<any[]>([]);
 const activeIndex = ref(0);
 const activeMode = ref<string | null>(null);
 const searchQuery = ref('');
-const searchTypeFilter = ref<'ALL' | 'COLOR' | 'FLOAT' | 'STRING' | 'BOOLEAN'>('ALL');
+const searchTypeFilter = ref<'ALL' | 'COLOR' | 'NUMBER' | 'STRING' | 'BOOLEAN'>('ALL');
 const typeFilterOptions: TypeFilterOption[] = [
   { value: 'ALL', label: 'All', icon: null },
   { value: 'COLOR', label: 'Colors', icon: '🎨' },
-  { value: 'FLOAT', label: 'Numbers', icon: '#' },
+  { value: 'NUMBER', label: 'Numbers', icon: '#' },
   { value: 'STRING', label: 'Strings', icon: 'T' },
   { value: 'BOOLEAN', label: 'Booleans', icon: 'B' },
 ];
@@ -128,7 +131,8 @@ const jsonDataForActiveCollection = computed(() => {
     parts.forEach((part: string, index: number) => {
       if (index === parts.length - 1) {
         const val = v.values.find((m: any) => m.modeId === activeMode.value)?.value || v.values[0]?.value;
-        current[part] = { value: val, type: v.type.toLowerCase() };
+        const mappedType = getMappedType(v.type);
+        current[part] = { value: val, type: mappedType };
       } else {
         if (!current[part]) current[part] = {};
         current = current[part];
@@ -397,7 +401,15 @@ const getDisplayValue = (v: any) => {
   if (modeVal?.alias) {
     return modeVal.alias.name.split('/').pop() || modeVal.alias.name;
   }
-  return modeVal?.value || 'N/A';
+  const val = modeVal?.value;
+  if (val === undefined || val === null) return 'N/A';
+  
+  // 針對 Boolean 類型進行特殊處理，確保顯示 'true' / 'false' 而非空白
+  if (v.type?.toUpperCase() === 'BOOLEAN') {
+    return (val === true || val === 1 || val === 'true') ? 'true' : 'false';
+  }
+  
+  return String(val);
 };
 
 // 檢查是否有重複的變數名稱
@@ -807,24 +819,16 @@ const handleJsonNodeClick = (node: any, pathFromArgs: string, e?: MouseEvent) =>
     pathParts = pathParts.slice(1);
   }
   
-  // 檢查這是否是點擊 value（我們只在點擊 value 時開啟編輯器）
-  const isClickingValue = pathParts.length > 0 && pathParts[pathParts.length - 1] === 'value';
-  
-  // 移除結尾的 'value' 或 'type'（這些是屬性，不是路徑的一部分）
+  // 移除結尾的 '$value', '$type', '$description'（這些是屬性內容，點擊它們也要能定位到主變數）
   if (pathParts.length > 0) {
     const lastPart = pathParts[pathParts.length - 1];
-    if (lastPart === 'value' || lastPart === 'type') {
+    if (lastPart === '$value' || lastPart === '$type' || lastPart === '$description' || lastPart === 'value' || lastPart === 'type') {
       pathParts = pathParts.slice(0, -1);
     }
   }
   
   // 如果路徑為空，說明點擊的是根節點或無效節點
   if (pathParts.length === 0) {
-    return;
-  }
-  
-  // 只有在點擊 value 時才繼續處理
-  if (!isClickingValue) {
     return;
   }
   
@@ -857,7 +861,7 @@ const handleJsonNodeClick = (node: any, pathFromArgs: string, e?: MouseEvent) =>
 const handleJsonNodeMouseover = (node: any, pathFromArgs: string, e: MouseEvent) => {
   // Try to get path from various possible structures
   const path = (typeof node === 'string' ? node : node?.path) || pathFromArgs || '';
-  const pathParts = path.split('.').filter((p: string) => p !== 'root' && p !== 'value' && p !== 'type');
+  const pathParts = path.split('.').filter((p: string) => p !== 'root' && p !== 'value' && p !== 'type' && p !== '$value' && p !== '$type' && p !== '$description');
   
   const variable = findVariableByPath(pathParts.join('.'));
   
@@ -921,8 +925,8 @@ const toggleSidebarFolder = (name: string) => {
 
 const normalizeVariableType = (type: string): VariableType => {
   const upper = (type || '').toUpperCase();
-  if (upper === 'NUMBER') return 'FLOAT';
-  if (upper === 'COLOR' || upper === 'FLOAT' || upper === 'STRING' || upper === 'BOOLEAN') {
+  if (upper === 'NUMBER') return 'NUMBER';
+  if (upper === 'COLOR' || upper === 'NUMBER' || upper === 'STRING' || upper === 'BOOLEAN') {
     return upper as VariableType;
   }
   return upper as VariableType;

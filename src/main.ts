@@ -127,11 +127,13 @@ async function refreshVariables() {
           try {
               const v = await figma.variables.getVariableByIdAsync(id);
               if(v) {
-                 // 抓取所有模式的值
+                  const resolvedType = v.resolvedType === 'FLOAT' ? 'NUMBER' : v.resolvedType;
+
+                  // 抓取所有模式的值
                   const valuesByMode = [];
                   for (const mode of modes) {
                     const rawVal = v.valuesByMode[mode.modeId];
-                    let resolvedVal = "N/A";
+                    let resolvedVal: any = "N/A";
                     let alias = null;
                     if (rawVal !== undefined) {
                         try {
@@ -144,10 +146,18 @@ async function refreshVariables() {
                            resolvedVal = "Error";
                         }
                     }
+
+                    // Normalize Boolean values
+                    let normalizedVal = resolvedVal;
+                    if (resolvedType === 'BOOLEAN' && resolvedVal !== "N/A" && resolvedVal !== "Error") {
+                      // 確保 Boolean 變數在數據層級就是真實的 true/false
+                      normalizedVal = (resolvedVal === true || resolvedVal === 1 || resolvedVal === 'true');
+                    }
+
                     valuesByMode.push({
                         modeId: mode.modeId,
                         modeName: mode.name,
-                        value: resolvedVal,
+                        value: normalizedVal,
                         alias: alias
                     });
                   }
@@ -157,7 +167,7 @@ async function refreshVariables() {
                      name: v.name,
                      description: v.description || "",
                      values: valuesByMode, // 傳送多個模式的值
-                     type: v.resolvedType
+                     type: resolvedType
                   });
               }
           } catch(err) {
@@ -213,11 +223,13 @@ figma.ui.onmessage = async (msg) => {
     try {
       const v = await figma.variables.getVariableByIdAsync(variableId);
       if (v) {
-        if (varType === 'Color' || varType === 'COLOR') {
+        if (varType?.toUpperCase() === 'COLOR') {
           v.setValueForMode(modeId, parseToFigmaColor(newValue));
-        } else if (varType === 'Number' || varType === 'FLOAT') {
-          v.setValueForMode(modeId, parseFloat(newValue));
-        } else if (varType === 'Boolean' || varType === 'BOOLEAN') {
+        } else if (varType?.toUpperCase() === 'NUMBER') {
+          const num = parseFloat(newValue);
+          v.setValueForMode(modeId, isNaN(num) ? 0 : num);
+        } else if (varType?.toUpperCase() === 'BOOLEAN') {
+          // 強制轉為布林類型
           v.setValueForMode(modeId, newValue === 'true' || newValue === true);
         } else {
           v.setValueForMode(modeId, newValue);

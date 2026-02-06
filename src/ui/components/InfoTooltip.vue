@@ -9,7 +9,11 @@ interface Props {
   placement: 'top' | 'bottom';
 }
 
+import { useVariableLogic } from '../../composables/useVariableLogic';
+
 const props = defineProps<Props>();
+
+const { getDisplayType, getTypeValuePreview } = useVariableLogic();
 
 const colorValue = computed(() => {
   if (!props.variable) return '';
@@ -26,16 +30,7 @@ const aliasName = computed(() => {
   return modeVal?.alias ? (modeVal.alias.name.split('/').pop() || modeVal.alias.name) : null;
 });
 
-const displayType = computed(() => {
-  if (!props.variable) return '';
-  switch (props.variable.type?.toUpperCase()) {
-    case 'FLOAT': return 'Number';
-    case 'COLOR': return 'Color';
-    case 'STRING': return 'String';
-    case 'BOOLEAN': return 'Boolean';
-    default: return props.variable.type;
-  }
-});
+const displayType = computed(() => getDisplayType(props.variable?.type));
 
 const tooltipPosition = computed(() => {
   const tooltipWidth = 240; // tooltip 的大約寬度
@@ -119,7 +114,7 @@ const tooltipPosition = computed(() => {
               v-else
               class="w-5 h-5 flex items-center justify-center rounded-md bg-white/5 border border-white/5 text-[10px] font-bold text-white/40 shrink-0 shadow-lg"
             >
-              {{ variable.type?.toUpperCase() === 'BOOLEAN' ? 'TF' : variable.type?.toUpperCase() === 'FLOAT' ? '0.1' : 'Aa' }}
+              {{ getTypeValuePreview(variable.type) }}
             </div>
 
             <div class="flex flex-col min-w-0 flex-1 justify-center">

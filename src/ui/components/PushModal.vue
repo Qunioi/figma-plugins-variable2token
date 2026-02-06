@@ -44,8 +44,12 @@ interface Props {
   activeCollectionIndex: number;
 }
 
+import { useVariableLogic } from '../../composables/useVariableLogic';
+
 const props = defineProps<Props>();
 const emit = defineEmits(['close', 'push']);
+
+const { getMappedType, serializeJson } = useVariableLogic();
 
 const activeTab = ref<'files' | 'commit' | 'diff'>('files');
 const commitMessage = ref('從 Figma 更新變數 Token');
@@ -83,21 +87,7 @@ const getFinalPath = (colName: string, modeName: string) => {
 };
 
 const getLocalContent = (col: Collection, modeId: string) => {
-  const result: Record<string, any> = {};
-  col.variables.forEach((v: any) => {
-    const parts = v.name.split('/');
-    let current = result;
-    parts.forEach((part: string, index: number) => {
-      if (index === parts.length - 1) {
-        const val = v.values.find((m: any) => m.modeId === modeId)?.value || v.values[0]?.value;
-        current[part] = { value: val, type: v.type.toLowerCase() };
-      } else {
-        if (!current[part]) current[part] = {};
-        current = current[part];
-      }
-    });
-  });
-  return JSON.stringify(result, null, 2);
+  return serializeJson(col.variables, modeId);
 };
 
 const checkForChanges = async () => {
@@ -315,7 +305,7 @@ const handlePush = () => {
         </div>
 
         <!-- 內容 -->
-        <div class="flex flex-col min-h-[400px] max-h-[580px] overflow-hidden">
+        <div class="flex flex-col min-h-[300px] max-h-[calc(100vh-120px)] overflow-hidden">
           
           <!-- 1. 檔案清單 -->
           <div v-if="activeTab === 'files'" class="flex-1 overflow-y-auto p-2 flex flex-col custom-scrollbar bg-black/10">
@@ -426,22 +416,22 @@ const handlePush = () => {
             <span class="text-[10px] font-medium">內容與遠端一致</span>
           </div>
           <div v-else class="flex flex-col">
-            <span class="text-[10px] text-white/40 uppercase font-bold tracking-tighter">Ready to Deploy</span>
+            <span class="text-[10px] text-white/40">Ready to Deploy</span>
             <span class="text-[13px] font-bold">{{ totalSelectedCount }} <span class="text-[10px] font-normal opacity-30">files</span></span>
           </div>
           
           <div class="flex gap-2">
-            <button @click="$emit('close')" class="px-4 py-2 rounded-lg text-[11px] font-bold text-white/40 hover:bg-white/5 transition-all">Cancel</button>
+            <button @click="$emit('close')" class="px-4 py-2 rounded-lg text-[11px] font-bold text-white/40 hover:bg-white/5 transition-all active:scale-[0.98]">Cancel</button>
             <button 
               v-if="activeTab !== 'diff'"
               @click="handlePush"
               :disabled="totalSelectedCount === 0 || (!hasActualChangesSelected)"
-              class="bg-white/10 text-white px-6 py-2 rounded-lg text-[12px] font-bold hover:bg-white/20 active:scale-[0.98] transition-all flex items-center gap-2 disabled:opacity-20 disabled:grayscale"
+              class="bg-figma-accent text-black/70 px-6 py-2 rounded-lg text-[12px] font-bold hover:bg-figma-accent/80 active:scale-[0.98] transition-all flex items-center gap-2 disabled:opacity-20 disabled:grayscale"
             >
               <CloudUpload :size="16" />
-              Confirm & Push
+              Push
             </button>
-            <button v-else @click="activeTab = 'files'" class="bg-white/10 px-6 py-2 rounded-lg text-[11px] font-bold hover:bg-white/20 transition-all">
+            <button v-else @click="activeTab = 'files'" class="bg-white/10 px-6 py-2 rounded-lg text-[11px] font-bold hover:bg-white/20 transition-all active:scale-[0.98]">
               Back to List
             </button>
           </div>

@@ -273,7 +273,7 @@ const internalTarget = computed({
             <div v-if="pickerTab === 'Libraries'" class="absolute bottom-0 left-0 w-full h-[2px] bg-figma-accent"></div>
           </button>
         </div>
-        <button @click="closePicker" class="p-2 opacity-40 hover:opacity-100 transition-opacity">
+        <button @click="closePicker" class="p-2 opacity-40 hover:opacity-100 transition-opacity active:scale-[0.98]">
           <X :size="14" />
         </button>
       </div>
@@ -309,7 +309,7 @@ const internalTarget = computed({
                 </div>
                 <button 
                   @click="$emit('detach-alias')"
-                  class="p-1 text-white/30 hover:text-white/80 hover:bg-white/5 rounded transition-all"
+                  class="p-1 text-white/30 hover:text-white/80 hover:bg-white/5 rounded transition-all active:scale-[0.98]"
                   title="Detach variable"
                 >
                   <Link2Off :size="12" />
@@ -332,7 +332,7 @@ const internalTarget = computed({
 
             <!-- Eye dropper & Sliders -->
             <div class="flex items-center gap-2 py-1">
-              <button class="p-1.5 hover:bg-white/10 rounded transition-colors text-white/70">
+              <button class="p-1.5 hover:bg-white/10 rounded transition-colors text-white/70 active:scale-[0.98]">
                 <Pipette :size="14" />
               </button>
               
@@ -371,7 +371,7 @@ const internalTarget = computed({
               <div class="w-[52px] shrink-0 h-[26px] relative">
                 <button 
                   @click.stop="isColorModeDropdownOpen = !isColorModeDropdownOpen"
-                  class="w-full h-full px-1 bg-black/20 hover:bg-black/40 rounded text-[10px] font-medium transition-all flex items-center justify-between gap-0.5 border border-white/5"
+                  class="w-full h-full px-1 bg-black/20 hover:bg-black/40 rounded text-[10px] font-medium transition-all flex items-center justify-between gap-0.5 border border-white/5 active:scale-[0.98]"
                 >
                   <span class="truncate">{{ pickerColorMode }}</span>
                   <ChevronDown :size="10" class="shrink-0 opacity-40" />
@@ -427,11 +427,45 @@ const internalTarget = computed({
           <template v-else>
             <div>
               <div class="text-[10px] text-white/40 font-medium px-0.5">Value</div>
+              
+              <!-- Boolean Toggle -->
+              <div 
+                v-if="target?.type?.toUpperCase() === 'BOOLEAN'"
+                @click="$emit('value-input', target?.initialValue === 'true' ? 'false' : 'true')"
+                class="w-full bg-black/20 border border-white/10 rounded px-3 py-2 text-[11px] cursor-pointer hover:bg-black/30 transition-all flex items-center justify-between group"
+              >
+                <span :class="target?.initialValue === 'true' ? 'text-figma-accent font-bold' : 'text-white/60'">
+                  {{ target?.initialValue?.toUpperCase() }}
+                </span>
+                <div 
+                  class="w-8 h-4 rounded-full p-0.5 transition-colors relative"
+                  :class="target?.initialValue === 'true' ? 'bg-figma-accent' : 'bg-white/10'"
+                >
+                  <div 
+                    class="w-3 h-3 bg-white rounded-full transition-transform shadow-sm"
+                    :class="target?.initialValue === 'true' ? 'translate-x-4' : 'translate-x-0'"
+                  ></div>
+                </div>
+              </div>
+
+              <!-- Number/String Input -->
               <input 
+                v-else
                 :value="target?.initialValue" 
-                @input="(e: any) => $emit('value-input', e.target.value)"
+                @input="(e: any) => {
+                  let val = e.target.value;
+                  const type = target?.type?.toUpperCase();
+                  if (type === 'NUMBER') {
+                    // 只留數字與負號、小數點
+                    val = val.replace(/[^-0-9.]/g, '');
+                  } else if (type === 'STRING') {
+                    // 只留英文與數字
+                    val = val.replace(/[^a-zA-Z0-9]/g, '');
+                  }
+                  $emit('value-input', val);
+                }"
                 class="w-full bg-black/20 border border-white/10 rounded px-2 py-2 text-[11px] outline-none text-white/80 focus:border-figma-accent transition-colors"
-                :placeholder="target?.type?.toUpperCase() === 'FLOAT' ? '0' : 'Value text'"
+                :placeholder="target?.type?.toUpperCase() === 'NUMBER' ? '0' : 'Alphanumeric only'"
               />
             </div>
           </template>
@@ -479,15 +513,15 @@ const internalTarget = computed({
                 </div>
 
                 <div class="flex bg-black/40 p-0.5 rounded-lg border border-white/5 shrink-0">
-                  <button @click="isLibraryGrid = false" :class="!isLibraryGrid ? 'bg-[#333] text-white shadow-md' : 'text-white/20 hover:text-white/40'" class="p-1.5 rounded-md transition-all duration-200">
+                  <button @click="isLibraryGrid = false" :class="!isLibraryGrid ? 'bg-[#333] text-white shadow-md' : 'text-white/20 hover:text-white/40'" class="p-1.5 rounded-md transition-all duration-200 active:scale-[0.98]">
                     <LayoutList :size="14" />
                   </button>
-                  <button @click="isLibraryGrid = true" :class="isLibraryGrid ? 'bg-[#333] text-white shadow-md' : 'text-white/20 hover:text-white/40'" class="p-1.5 rounded-md transition-all duration-200">
+                  <button @click="isLibraryGrid = true" :class="isLibraryGrid ? 'bg-[#333] text-white shadow-md' : 'text-white/20 hover:text-white/40'" class="p-1.5 rounded-md transition-all duration-200 active:scale-[0.98]">
                     <LayoutGrid :size="14" />
                   </button>
                 </div>
 
-                <button @click="toggleLibrarySmartGroups" :title="anyLibraryGroupsExpanded ? 'Collapse All' : 'Expand All'" class="px-1 transition-colors text-white/40 hover:text-white/80">
+                <button @click="toggleLibrarySmartGroups" :title="anyLibraryGroupsExpanded ? 'Collapse All' : 'Expand All'" class="px-1 transition-colors text-white/40 hover:text-white/80 active:scale-[0.98]">
                   <FoldVertical v-if="anyLibraryGroupsExpanded" :size="15" />
                   <UnfoldVertical v-else :size="15" />
                 </button>

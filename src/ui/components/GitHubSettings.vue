@@ -131,7 +131,7 @@ const handleSaveRepo = () => {
                 </div>
                 <div class="text-[11px] text-white/40 italic">已成功連動 GitHub 帳號</div>
               </div>
-              <button @click="$emit('logout')" class="p-2 hover:bg-red-500/10 text-red-400/60 hover:text-red-400 rounded-lg transition-colors" title="中斷帳號連動">
+              <button @click="$emit('logout')" class="p-2 hover:bg-red-500/10 text-red-400/60 hover:text-red-400 rounded-lg transition-colors active:scale-[0.98]" title="中斷帳號連動">
                 <LogOut :size="16" />
               </button>
             </div>
@@ -163,7 +163,7 @@ const handleSaveRepo = () => {
                       <button 
                         @click="validateAndLogin"
                         :disabled="isValidating || !inputToken"
-                        class="bg-figma-accent text-white px-3 py-1.5 rounded-lg text-[11px] font-bold hover:brightness-110 disabled:opacity-30 flex items-center gap-1"
+                        class="bg-figma-accent text-black/70 px-3 py-1.5 rounded-lg text-[11px] font-bold hover:bg-figma-accent/80 disabled:opacity-30 flex items-center gap-1 active:scale-[0.98]"
                       >
                         <Loader2 v-if="isValidating" :size="12" class="animate-spin" />
                         <span v-else>連動</span>
@@ -232,7 +232,7 @@ const handleSaveRepo = () => {
           <button 
             @click="handleSaveRepo"
             :disabled="!settings.githubAccount"
-            class="w-full bg-figma-accent text-white h-10 rounded-xl text-[13px] font-bold flex items-center justify-center gap-2 transition-all disabled:opacity-30 shadow-lg shadow-figma-accent/10"
+            class="w-full bg-figma-accent text-black/70 h-10 rounded-xl text-[13px] font-bold flex items-center justify-center gap-2 transition-all disabled:opacity-30 shadow-lg shadow-figma-accent/10 hover:bg-figma-accent/80 active:scale-[0.98]"
           >
             <Save :size="16" />
             儲存目前設定

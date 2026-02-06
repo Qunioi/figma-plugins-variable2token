@@ -1,4 +1,4 @@
-export type VariableType = 'COLOR' | 'FLOAT' | 'STRING' | 'BOOLEAN';
+export type VariableType = 'COLOR' | 'NUMBER' | 'STRING' | 'BOOLEAN';
 
 export interface VariableModeValue {
   modeId: string;

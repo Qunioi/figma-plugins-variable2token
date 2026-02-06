@@ -56,12 +56,12 @@ const setIsSidebarCollapsed = (val: boolean) => {
 </script>
 
 <template>
-  <header class="h-11 border-b border-figma-border flex items-center px-3 gap-3 bg-figma-bg z-10 shrink-0">
+  <header class="h-11 border-b border-figma-border flex items-center pl-2 pr-1 gap-3 bg-figma-bg z-10 shrink-0">
     <!-- Sidebar toggle button (show when collapsed) -->
     <button 
       v-if="isSidebarCollapsed"
       @click="setIsSidebarCollapsed(false)" 
-      class="p-1.5 hover:bg-white/10 rounded transition-colors text-white/40 hover:text-white"
+      class="p-1.5 hover:bg-white/10 rounded transition-colors text-white/40 hover:text-white active:scale-[0.98]"
     >
       <PanelLeftOpen :size="14" />
     </button>
@@ -82,12 +82,12 @@ const setIsSidebarCollapsed = (val: boolean) => {
       <div class="relative">
         <button 
           @click="isTypeFilterOpen = !isTypeFilterOpen"
-          class="flex items-center gap-1.5 px-2 py-1 bg-white/5 border border-figma-border rounded-md text-[11px] hover:bg-white/10 transition-colors w-[102px]"
+          class="flex items-center gap-1.5 px-2 py-1 bg-white/5 border border-figma-border rounded-md text-[11px] hover:bg-white/10 transition-colors w-[102px] active:scale-[0.98]"
           :class="searchTypeFilter !== 'ALL' ? 'text-figma-accent border-figma-accent/50' : 'text-white/60'"
         >
           <Layers v-if="searchTypeFilter === 'ALL'" :size="14" />
           <Palette v-else-if="searchTypeFilter === 'COLOR'" :size="14" />
-          <Hash v-else-if="searchTypeFilter === 'FLOAT'" :size="14" />
+          <Hash v-else-if="searchTypeFilter === 'NUMBER'" :size="14" />
           <Type v-else-if="searchTypeFilter === 'STRING'" :size="14" />
           <ToggleLeft v-else-if="searchTypeFilter === 'BOOLEAN'" :size="14" />
           <span class="flex-1 text-left">{{ typeFilterOptions.find(t => t.value === searchTypeFilter)?.label }}</span>
@@ -115,7 +115,7 @@ const setIsSidebarCollapsed = (val: boolean) => {
           >
             <Layers v-if="opt.value === 'ALL'" :size="14" />
             <Palette v-else-if="opt.value === 'COLOR'" :size="14" />
-            <Hash v-else-if="opt.value === 'FLOAT'" :size="14" />
+            <Hash v-else-if="opt.value === 'NUMBER'" :size="14" />
             <Type v-else-if="opt.value === 'STRING'" :size="14" />
             <ToggleLeft v-else-if="opt.value === 'BOOLEAN'" :size="14" />
             <span class="flex-1">{{ opt.label }}</span>
@@ -132,7 +132,7 @@ const setIsSidebarCollapsed = (val: boolean) => {
       <button 
         @click="$emit('toggle-smart-groups')" 
         :title="anyGroupsExpanded ? 'Collapse All' : 'Expand All'" 
-        class="p-1.5 hover:bg-white/10 rounded transition-colors text-white/40 hover:text-white" 
+        class="p-1.5 hover:bg-white/10 rounded transition-colors text-white/40 hover:text-white active:scale-[0.98]" 
       >
         <FoldVertical v-if="anyGroupsExpanded" :size="15" />
         <UnfoldVertical v-else :size="15" />
@@ -144,7 +144,7 @@ const setIsSidebarCollapsed = (val: boolean) => {
           @click="setViewMode('list')"
           :title="'List View'"
           :class="viewMode === 'list' ? 'bg-[#333] text-white shadow-md' : 'text-white/20 hover:text-white/40'"
-          class="p-1.5 rounded-md transition-all duration-200"
+          class="p-1.5 rounded-md transition-all duration-200 active:scale-[0.98]"
         >
           <LayoutList :size="14" />
         </button>
@@ -152,7 +152,7 @@ const setIsSidebarCollapsed = (val: boolean) => {
           @click="setViewMode('grid')"
           :title="'Grid View'"
           :class="viewMode === 'grid' ? 'bg-[#333] text-white shadow-md' : 'text-white/20 hover:text-white/40'"
-          class="p-1.5 rounded-md transition-all duration-200"
+          class="p-1.5 rounded-md transition-all duration-200 active:scale-[0.98]"
         >
           <LayoutGrid :size="14" />
         </button>
@@ -160,7 +160,7 @@ const setIsSidebarCollapsed = (val: boolean) => {
           @click="setViewMode('json')"
           :title="'JSON View'"
           :class="viewMode === 'json' ? 'bg-[#333] text-white shadow-md' : 'text-white/20 hover:text-white/40'"
-          class="p-1.5 rounded-md transition-all duration-200"
+          class="p-1.5 rounded-md transition-all duration-200 active:scale-[0.98]"
         >
           <Code :size="14" />
         </button>
@@ -169,7 +169,7 @@ const setIsSidebarCollapsed = (val: boolean) => {
       <button 
         @click="$emit('refresh')" 
         title="Refresh" 
-        class="p-1.5 hover:bg-white/10 rounded transition-colors text-white/40 hover:text-white"
+        class="p-1.5 hover:bg-white/10 rounded transition-colors text-white/40 hover:text-white active:scale-[0.98]"
       >
         <RefreshCcw :size="14" />
       </button>

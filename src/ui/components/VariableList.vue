@@ -15,7 +15,8 @@ import {
   ToggleLeft,
   Github,
   CloudUpload,
-  Settings
+  Settings,
+  Check
 } from 'lucide-vue-next';
 import VueJsonPretty from 'vue-json-pretty';
 import 'vue-json-pretty/lib/styles.css';
@@ -36,6 +37,8 @@ interface Props {
   collapsedGroups: Set<string>;
 }
 
+import { useVariableLogic } from '../../composables/useVariableLogic';
+
 const props = defineProps<Props>();
 const emit = defineEmits([
   'update:viewMode',
@@ -51,13 +54,22 @@ const emit = defineEmits([
   'json-mouse-move'
 ]);
 
+const { 
+  getMappedType, 
+  getTypeSymbol, 
+  generateOrderedJsonObject, 
+  serializeJson 
+} = useVariableLogic();
+
 const filteredVariables = computed(() => {
   if (!props.activeCollection) return [];
   let vars = props.activeCollection.variables || [];
   
-  // 類型篩選
   if (props.searchTypeFilter !== 'ALL') {
-    vars = vars.filter((v: any) => v.type?.toUpperCase() === props.searchTypeFilter);
+    vars = vars.filter((v: any) => {
+      const targetType = getMappedType(props.searchTypeFilter);
+      return getMappedType(v.type) === targetType;
+    });
   }
   
   // 文字搜尋
@@ -80,39 +92,30 @@ const groupedVariables = computed(() => {
   return groups;
 });
 
+const includeDescription = ref(true);
+
 const jsonData = computed(() => {
-  if (!props.activeCollection) return {};
-  const result: Record<string, any> = {};
-  
-  filteredVariables.value.forEach((v: any) => {
-    const parts = v.name.split('/');
-    let current = result;
-    
-    parts.forEach((part: string, index: number) => {
-      if (index === parts.length - 1) {
-        const val = v.values.find((m: any) => m.modeId === props.activeMode)?.value || v.values[0]?.value;
-        current[part] = {
-          value: val,
-          type: v.type.toLowerCase()
-        };
-      } else {
-        if (!current[part]) current[part] = {};
-        current = current[part];
-      }
-    });
-  });
-  
-  return result;
+  return generateOrderedJsonObject(filteredVariables.value, props.activeMode, { includeDescription: includeDescription.value });
 });
 
-const jsonContent = computed(() => JSON.stringify(jsonData.value, null, 2));
+// 自訂 JSON 序列化函數，保持順序
+const jsonContent = computed(() => {
+  return serializeJson(filteredVariables.value, props.activeMode, { includeDescription: includeDescription.value });
+});
 
 const getDisplayValue = (v: any) => {
   const modeVal = v.values.find((m: any) => m.modeId === props.activeMode) || v.values[0];
   if (modeVal?.alias) {
     return modeVal.alias.name.split('/').pop() || modeVal.alias.name;
   }
-  return modeVal?.value || 'N/A';
+  const val = modeVal?.value;
+  if (val === undefined || val === null) return 'N/A';
+
+  if (v.type?.toUpperCase() === 'BOOLEAN') {
+    return (val === true || val === 1 || val === 'true') ? 'true' : 'false';
+  }
+  
+  return String(val);
 };
 
 
@@ -217,7 +220,7 @@ const isSyncing = ref(false); // can be removed
                 class="w-5 h-5 flex items-center justify-center rounded-md bg-white/5 border border-figma-border text-[9px] font-bold opacity-60 shrink-0 cursor-pointer hover:bg-white/10"
                 @click.stop="openPicker($event, v)"
               >
-                {{ v.type?.toUpperCase() === 'BOOLEAN' ? 'B' : v.type?.toUpperCase() === 'FLOAT' ? '#' : 'T' }}
+                {{ getTypeSymbol(v.type) }}
               </div>
 
               <!-- Name -->
@@ -269,7 +272,7 @@ const isSyncing = ref(false); // can be removed
             >
               <div class="aspect-square rounded-lg bg-white/5 border border-white/5 flex items-center justify-center relative overflow-hidden transition-all duration-300 group-hover/card:border-white/20 group-hover/card:scale-105 group-hover/card:shadow-xl">
                 <div v-if="v.type?.toUpperCase() === 'COLOR'" class="absolute inset-0" :style="{ backgroundColor: v.values.find((m:any) => m.modeId === activeMode)?.value || v.values[0]?.value }"></div>
-                <span v-else class="text-xs font-bold opacity-20 group-hover/card:opacity-40">{{ v.type?.toUpperCase() === 'BOOLEAN' ? 'B' : v.type?.toUpperCase() === 'FLOAT' ? '#' : 'T' }}</span>
+                <span v-else class="text-xs font-bold opacity-20 group-hover/card:opacity-40">{{ getTypeSymbol(v.type) }}</span>
                 
                 <!-- Hover Overlay -->
                 <div class="absolute inset-0 bg-black/20 opacity-0 group-hover/card:opacity-100 transition-opacity flex items-center justify-center">
@@ -283,30 +286,44 @@ const isSyncing = ref(false); // can be removed
 
       <!-- JSON View -->
       <div v-else-if="viewMode === 'json'" class="h-full flex flex-col pt-0 pb-4 overflow-hidden">
-        <div class="flex items-center justify-between py-2 px-2 shrink-0">
-          <div class="flex items-center gap-2">
-            <span class="text-[10px] opacity-30">Tokens JSON</span>
-            <!-- Theme Selector -->
-            <div class="relative">
-              <select 
-                v-model="internalJsonTheme"
-                class="appearance-none bg-black/30 border border-white/10 rounded px-2 py-1 pr-6 text-[10px] text-white/70 hover:border-white/20 focus:border-figma-accent focus:outline-none cursor-pointer transition-colors"
-              >
-                <option v-for="t in jsonThemeOptions" :key="t.value" :value="t.value">{{ t.label }}</option>
-              </select>
-              <ChevronDown :size="10" class="absolute right-1.5 top-1/2 -translate-y-1/2 pointer-events-none opacity-40" />
+        <div class="flex items-center justify-between py-2 px-2 shrink-0 border-b border-white/[0.03] bg-black/10">
+          <div class="flex items-center gap-3">
+            <div class="flex items-center gap-2">
+              <span class="text-[10px] opacity-30">Tokens JSON</span>
+              <div class="relative">
+                <select 
+                  v-model="internalJsonTheme"
+                  class="appearance-none bg-black/30 border border-white/10 rounded px-2 py-1 pr-6 text-[10px] text-white/70 hover:border-white/20 focus:border-figma-accent focus:outline-none cursor-pointer transition-colors"
+                >
+                  <option v-for="t in jsonThemeOptions" :key="t.value" :value="t.value">{{ t.label }}</option>
+                </select>
+                <ChevronDown :size="10" class="absolute right-1.5 top-1/2 -translate-y-1/2 pointer-events-none opacity-40" />
+              </div>
             </div>
+
+            <!-- Include Description Checkbox -->
+            <label class="flex items-center gap-1 cursor-pointer group">
+              <div class="relative flex items-center">
+                <input 
+                  type="checkbox" 
+                  v-model="includeDescription" 
+                  class="peer appearance-none w-3 h-3 border border-white/20 rounded-sm bg-black/30 checked:bg-figma-accent checked:border-figma-accent transition-all"
+                />
+                <Check :size="12" class="absolute left-0 top-0 text-white opacity-0 peer-checked:opacity-100 transition-opacity pointer-events-none" />
+              </div>
+              <span class="text-[10px] text-white/40 line-height-[1] group-hover:text-white/60 transition-colors">Include Descriptions</span>
+            </label>
           </div>
           <div class="flex items-center gap-2">
             <button 
               @click="downloadJson"
-              class="text-[10px] flex items-center gap-1.5 px-2 py-1 hover:bg-white/10 rounded transition-colors border border-white/10 text-white/60"
+              class="text-[10px] flex items-center gap-1.5 px-2 py-1 hover:bg-white/10 rounded transition-colors border border-white/10 text-white/60 active:scale-[0.98]"
             >
               <Download :size="12" /> Download
             </button>
             <button 
               @click="copyValue(jsonContent, 'JSON')"
-              class="text-[10px] flex items-center gap-1.5 px-2 py-1 hover:bg-white/10 rounded transition-colors border border-white/10 text-white/60"
+              class="text-[10px] flex items-center gap-1.5 px-2 py-1 hover:bg-white/10 rounded transition-colors border border-white/10 text-white/60 active:scale-[0.98]"
             >
               <Copy :size="12" /> Copy
             </button>
