@@ -227,7 +227,7 @@ const isSyncing = ref(false); // can be removed
               <div class="flex-1 min-w-0 pointer-events-auto">
                 <div 
                   class="text-[12px] truncate font-medium text-white/60 hover:text-white cursor-pointer transition-colors inline-block"
-                  @click.stop="copyValue(v.name.split('/').pop() || '', 'Name')"
+                  @click.stop="openPicker($event, v)"
                 >
                   {{ v.name.split('/').pop() }}
                 </div>

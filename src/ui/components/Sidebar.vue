@@ -3,7 +3,8 @@ import { computed } from 'vue';
 import { 
   PanelLeftClose, 
   ChevronDown, 
-  ChevronRight 
+  ChevronRight,
+  Plus
 } from 'lucide-vue-next';
 
 interface Props {
@@ -25,7 +26,10 @@ const emit = defineEmits([
   'select-mode',
   'toggle-folder',
   'handle-resize',
-  'handle-hover'
+  'handle-hover',
+  'create-collection',
+  'create-mode',
+  'context-menu'
 ]);
 
 const structuredCollections = computed(() => {
@@ -87,6 +91,12 @@ const setSidebarCollapsed = (val: boolean) => {
   emit('update:isSidebarCollapsed', val);
 };
 
+const getDisplayModes = (col: any) => {
+  if (!col) return [];
+  const isEmptyDefault = (col.variables?.length || 0) === 0 && (col.modes?.length || 0) === 1 && col.modes[0].name === 'Mode 1';
+  return isEmptyDefault ? [] : (col.modes || []);
+};
+
 </script>
 
 <template>
@@ -116,7 +126,7 @@ const setSidebarCollapsed = (val: boolean) => {
                 <ChevronRight v-else :size="12" class="text-white/20 group-hover/folder:text-white/40" />
                 <div class="text-[12px] truncate font-medium text-white/90">{{ group.name }}</div>
               </div>
-              <div class="text-[10px] opacity-20 font-mono">{{ group.children.length }}</div>
+              <div class="text-[10px] text-white/40 font-mono">{{ group.children.length }}</div>
             </div>
           </div>
 
@@ -124,10 +134,10 @@ const setSidebarCollapsed = (val: boolean) => {
           <div v-if="!collapsedSidebarFolders.has(group.name)" class="ml-4">
             <template v-for="(child, cIdx) in group.children" :key="cIdx">
               <div 
-                @click="selectCollection(child.originalIndex)"
+                @click="toggleSidebarFolder('child_' + child.originalIndex)"
                 @mouseenter="handleSidebarHover(child.originalIndex, $event)"
                 @mouseleave="handleSidebarHover(null)"
-                class="flex items-center h-8 cursor-pointer transition-all group/item relative mr-2 rounded-md"
+                class="flex items-center h-8 transition-all group/item relative mr-2 ml-2 rounded-md cursor-pointer"
                 :class="[
                   activeIndex === child.originalIndex ? 'bg-white/[0.08] text-white font-bold' : 'text-white/50 hover:bg-white/5'
                 ]"
@@ -138,21 +148,23 @@ const setSidebarCollapsed = (val: boolean) => {
                   <div class="absolute top-1/2 left-0 w-3 h-[1px] bg-white/10"></div>
                 </div>
                 
+                <div
+                  v-if="getDisplayModes(child).length >= 1"
+                  class="ml-1 h-5 w-5 flex items-center justify-center rounded text-white/40"
+                >
+                  <ChevronDown v-if="!collapsedSidebarFolders.has('child_' + child.originalIndex)" :size="12" />
+                  <ChevronRight v-else :size="12" />
+                </div>
                 <div 
-                  class="text-[11px] truncate flex-1 pl-3 select-none"
-                  @click.stop="() => {
-                    selectCollection(child.originalIndex);
-                    if (child.modes?.length > 1) {
-                      toggleSidebarFolder('child_' + child.originalIndex);
-                    }
-                  }"
+                  class="text-[11px] truncate flex-1 pl-2 select-none cursor-pointer"
+                  @contextmenu.prevent.stop="emit('context-menu', $event, 'collection', { collectionName: child.collectionName })"
                 >{{ child.displayName }}</div>
               </div>
 
               <!-- Modes Tree for folder children -->
-              <div v-if="!collapsedSidebarFolders.has('child_' + child.originalIndex) && child.modes?.length > 1" class="ml-4 relative">
+              <div v-if="!collapsedSidebarFolders.has('child_' + child.originalIndex) && getDisplayModes(child).length >= 1" class="ml-4 relative">
                 <div 
-                  v-for="(mode, mIdx) in child.modes" 
+                  v-for="(mode, mIdx) in getDisplayModes(child)" 
                   :key="mode.modeId"
                   @click.stop="selectMode(child.originalIndex, mode.modeId)"
                   class="flex items-center h-8 cursor-pointer transition-all relative mr-2 ml-4 rounded-md"
@@ -160,11 +172,15 @@ const setSidebarCollapsed = (val: boolean) => {
                     activeIndex === child.originalIndex && activeMode === mode.modeId ? 'bg-white/[0.08] text-white font-medium' : 'text-white/40 hover:bg-white/5'
                   ]"
                 >
-                  <div class="absolute -left-3 h-full flex flex-col items-center">
-                    <div class="w-[1px] bg-white/5" :class="mIdx === child.modes.length - 1 ? 'h-1/2' : 'h-full'"></div>
-                    <div class="absolute top-1/2 left-0 w-2 h-[1px] bg-white/5"></div>
+                  <div class="absolute -left-3 w-[1px] h-full">
+                    <div class="w-full bg-white/5" :class="mIdx === getDisplayModes(child).length - 1 ? 'h-1/2' : 'h-full'"></div>
+                    <div class="absolute top-1/2 left-0 w-3 h-[1px] bg-white/5"></div>
                   </div>
-                  <div class="text-[11px] truncate flex-1 pl-3">{{ mode.name }}</div>
+                  <div 
+                    class="text-[11px] truncate flex-1 pl-3 font-normal"
+                    @click.stop="selectMode(child.originalIndex, mode.modeId)"
+                    @contextmenu.prevent.stop="emit('context-menu', $event, 'mode', { collectionName: child.collectionName, mode, varCount: child.variables?.length || 0 })"
+                  >{{ mode.name }}</div>
                 </div>
               </div>
             </template>
@@ -174,46 +190,70 @@ const setSidebarCollapsed = (val: boolean) => {
         <!-- Flat Item (Collection Header) -->
         <div v-else class="mb-1">
           <div 
-            @click="selectCollection(group.originalIndex)"
-            class="flex items-center gap-2 px-3 h-9 cursor-pointer transition-all group/flat relative rounded-md mx-1"
+            @click="toggleSidebarFolder('flat_' + group.originalIndex)"
+            class="flex items-center gap-2 pl-2 h-6 mt-2 transition-all group/flat relative rounded-md mx-1"
             :class="[
               activeIndex === group.originalIndex ? 'text-white' : 'text-white/50 hover:bg-white/5'
             ]"
           >
             <div class="flex-1 flex items-center justify-between min-w-0">
               <div 
-                class="text-[12px] truncate select-none"
-                @click.stop="() => {
-                  selectCollection(group.originalIndex);
-                  if (collections[group.originalIndex]?.modes?.length > 1) {
-                    toggleSidebarFolder('flat_' + group.originalIndex);
-                  }
-                }"
+                class="text-[12px] truncate select-none cursor-pointer"
+                @contextmenu.prevent.stop="emit('context-menu', $event, 'collection', { collectionName: group.collectionName, varCount: collections[group.originalIndex]?.variables?.length || 0 })"
               >{{ group.displayName }}</div>
-              <div class="text-[10px] opacity-20 font-mono">{{ collections[group.originalIndex]?.modes?.length || 0 }}</div>
+              <div class="flex items-center gap-1">
+                <div
+                  v-if="getDisplayModes(collections[group.originalIndex]).length > 0"
+                  class="text-[10px] text-white/40 font-mono"
+                >{{ getDisplayModes(collections[group.originalIndex]).length }}</div>
+                <div
+                  v-if="getDisplayModes(collections[group.originalIndex]).length >= 1"
+                  class="h-5 w-5 flex items-center justify-center text-white/40"
+                >
+                  <ChevronDown v-if="!collapsedSidebarFolders.has('flat_' + group.originalIndex)" :size="12" />
+                  <ChevronRight v-else :size="12" />
+                </div>
+              </div>
             </div>
           </div>
 
           <!-- Modes Tree for flat items -->
-          <div v-if="!collapsedSidebarFolders.has('flat_' + group.originalIndex) && collections[group.originalIndex]?.modes?.length > 1" class="ml-3 relative">
+          <div v-if="!collapsedSidebarFolders.has('flat_' + group.originalIndex) && getDisplayModes(collections[group.originalIndex]).length >= 1" class="ml-3 relative">
             <div 
-              v-for="(mode, mIdx) in collections[group.originalIndex].modes" 
+              v-for="(mode, mIdx) in getDisplayModes(collections[group.originalIndex])" 
               :key="mode.modeId"
               @click.stop="selectMode(group.originalIndex, mode.modeId)"
-              class="flex items-center h-7 cursor-pointer transition-all relative mr-2 ml-4 rounded-md"
+              class="flex items-center h-8 cursor-pointer transition-all relative mr-2 ml-4 rounded-md"
               :class="[
-                activeIndex === group.originalIndex && activeMode === mode.modeId ? 'bg-white/[0.08] text-white font-medium' : 'text-white/40 hover:bg-white/5'
+                activeIndex === group.originalIndex && activeMode === mode.modeId ? 'bg-white/[0.08] text-white' : 'text-white/40 hover:bg-white/5'
               ]"
             >
-              <div class="absolute -left-3 h-full flex flex-col items-center">
-                <div class="w-[1px] bg-white/5" :class="mIdx === collections[group.originalIndex].modes.length - 1 ? 'h-1/2' : 'h-full'"></div>
-                <div class="absolute top-1/2 left-0 w-2 h-[1px] bg-white/5"></div>
+              <div class="absolute -left-3 w-[1px] h-full">
+                <div class="w-full bg-white/5" :class="mIdx === getDisplayModes(collections[group.originalIndex]).length - 1 ? 'h-1/2' : 'h-full'"></div>
+                <div class="absolute top-1/2 h-[1px] bg-white/5" :class="mIdx === getDisplayModes(collections[group.originalIndex]).length - 1 ? 'left-0 w-[12px]' : 'left-[1px] w-[11px]'"></div>
               </div>
-              <div class="text-[11px] truncate flex-1 pl-2">{{ mode.name }}</div>
+              <div 
+                class="text-[11px] truncate flex-1 pl-2 font-normal"
+                @click.stop="selectMode(group.originalIndex, mode.modeId)"
+                @contextmenu.prevent.stop="emit('context-menu', $event, 'mode', { collectionName: collections[group.originalIndex].collectionName, mode, varCount: collections[group.originalIndex]?.variables?.length || 0 })"
+              >{{ mode.name }}</div>
             </div>
           </div>
         </div>
       </template>
+      
+      <!-- New Set Button inside list -->
+      <div class="px-1 pb-4">
+        <div 
+          @click="emit('create-collection')"
+          class="flex items-center h-8 border border-transparent cursor-pointer transition-all rounded-md text-white/20 hover:text-white/60 hover:border-white/5 group/newset mx-1"
+        >
+          <div class="flex items-center gap-1 pl-1">
+            <Plus :size="10" />
+            <div class="text-[11px]">New Collection</div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- Tooltip simulation (Moved outside overflow container) -->

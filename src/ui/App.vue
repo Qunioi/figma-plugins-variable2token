@@ -27,6 +27,9 @@ import Toolbar from './components/Toolbar.vue';
 import Footer from './components/Footer.vue';
 import PushModal from './components/PushModal.vue';
 import GitHubSettingsModal from './components/GitHubSettings.vue';
+import SimpleEditor from './components/SimpleEditor.vue';
+import ContextMenu from './components/ContextMenu.vue';
+import DeleteConfirmModal from './components/DeleteConfirmModal.vue';
 import { useHistory } from '../composables/useHistory';
 
 
@@ -42,10 +45,10 @@ const {
   hslaToRgba 
 } = useColorConversion();
 
-const { getMappedType } = useVariableLogic();
+const { getMappedType, serializeJson } = useVariableLogic();
 
 // --- Demo Data Imports ---
-const demoFiles = import.meta.glob('../demo/**/*.tokens.json', { eager: true });
+const demoFiles = import.meta.glob('../collections/**/*.tokens.json', { eager: true });
 
 // --- Custom Color Picker Internal State ---
 const pickerVisible = ref(false);
@@ -69,6 +72,7 @@ const pickerHsv = ref({ h: 0, s: 0, v: 0, a: 1 });
 const collections = ref<any[]>([]);
 const activeIndex = ref(0);
 const activeMode = ref<string | null>(null);
+const defaultModeByCollection = ref<Record<string, string>>({});
 const searchQuery = ref('');
 const searchTypeFilter = ref<'ALL' | 'COLOR' | 'NUMBER' | 'STRING' | 'BOOLEAN'>('ALL');
 const typeFilterOptions: TypeFilterOption[] = [
@@ -108,6 +112,220 @@ const showToastWithTimer = (message: string, duration = 3000) => {
     showToast.value = false;
     toastTimer = null;
   }, duration);
+};
+
+// --- Simple Editor for Collections & Modes ---
+const simpleEditor = ref({
+  visible: false,
+  pos: { top: 0, left: 0 },
+  title: '',
+  name: '',
+  valueLabel: '',
+  value: '',
+  options: [] as string[],
+  onSave: (newName: string, newValue: string) => {}
+});
+
+// --- Context Menu & Delete State ---
+const contextMenu = ref({
+  visible: false,
+  pos: { x: 0, y: 0 },
+  type: 'collection' as 'collection' | 'mode',
+  data: {} as any,
+  deleteDisabled: false
+});
+
+const deleteModal = ref({
+  visible: false,
+  itemPath: '',
+  itemType: 'Collection' as 'Collection' | 'Mode',
+  onConfirm: () => {}
+});
+
+const handleContextMenu = (e: MouseEvent, type: 'collection' | 'mode', data: any) => {
+  const deleteDisabled = false;
+  
+  contextMenu.value = {
+    visible: true,
+    pos: { x: e.clientX, y: e.clientY },
+    type,
+    data,
+    deleteDisabled
+  };
+};
+
+const handleDuplicateFromMenu = () => {
+  const { data } = contextMenu.value;
+  const collectionNames = collections.value.map(c => c.collectionName);
+  const sourceCollection = collections.value.find(c => c.collectionName === data.collectionName);
+  const sourceVariableIds = sourceCollection?.variables?.map((v: any) => v.id) || [];
+  const sourceVariablesPayload = (sourceCollection?.variables || []).map((v: any) => ({
+    id: v.id,
+    name: v.name,
+    type: v.type,
+    description: v.description || '',
+    valuesByMode: Object.fromEntries((v.values || []).map((m: any) => [m.modeId, m.value])),
+    aliasesByMode: Object.fromEntries((v.values || []).map((m: any) => [m.modeId, m.alias?.name || null]))
+  }));
+  const tempTokensJson = sourceCollection ? serializeJson(sourceCollection.variables || [], data.mode.modeId, { includeDescription: true }) : '';
+
+  console.log('[V2T][UI] Duplicate Mode: prepare payload', {
+    sourceCollectionName: data.collectionName,
+    modeId: data.mode.modeId,
+    variables: sourceVariablesPayload.length,
+    tokenJsonSize: tempTokensJson?.length || 0
+  });
+
+  simpleEditor.value = {
+    visible: true,
+    pos: { top: contextMenu.value.pos.y, left: contextMenu.value.pos.x },
+    title: 'Duplicate Mode to...',
+    name: data.mode.name,
+    valueLabel: 'Target Collection',
+    value: data.collectionName,
+    options: collectionNames,
+    onSave: (newName: string, targetCollectionName: string) => {
+      console.log('[V2T][UI] Duplicate Mode: send to main', {
+        sourceCollectionName: data.collectionName,
+        targetCollectionName,
+        modeId: data.mode.modeId,
+        newName
+      });
+      parent.postMessage({ 
+        pluginMessage: { 
+          type: 'duplicate-mode', 
+          modeId: data.mode.modeId, 
+          sourceCollectionName: data.collectionName, 
+          targetCollectionName,
+          newName,
+          sourceVariableIds,
+          sourceVariablesPayload,
+          tempTokensJson
+        } 
+      }, '*');
+    }
+  };
+};
+
+const handleDuplicateCollectionFromMenu = () => {
+  const { data } = contextMenu.value;
+
+  simpleEditor.value = {
+    visible: true,
+    pos: { top: contextMenu.value.pos.y, left: contextMenu.value.pos.x },
+    title: 'Duplicate Collection',
+    name: data.collectionName,
+    valueLabel: 'Status',
+    value: 'All modes & variables will be copied',
+    options: [],
+    onSave: (newName: string) => {
+      parent.postMessage({ 
+        pluginMessage: { 
+          type: 'duplicate-collection', 
+          sourceName: data.collectionName, 
+          newName 
+        } 
+      }, '*');
+    }
+  };
+};
+
+const handleEditFromMenu = () => {
+  const { type, data, pos } = contextMenu.value;
+  // 模擬觸發原本的 editor 開啟邏輯，但位置改用滑鼠位置
+  const fakeEvent = { currentTarget: { getBoundingClientRect: () => ({ left: pos.x, bottom: pos.y, width: 0 }) } } as any;
+  if (type === 'collection') {
+    openCollectionEditor(fakeEvent, data.collectionName);
+  } else {
+    openModeEditor(fakeEvent, data.collectionName, data.mode);
+  }
+};
+
+const handleDeleteFromMenu = () => {
+  const { type, data } = contextMenu.value;
+  if (type === 'collection') {
+    deleteModal.value = {
+      visible: true,
+      itemPath: data.collectionName,
+      itemType: 'Collection',
+      onConfirm: () => {
+        parent.postMessage({ pluginMessage: { type: 'delete-collection', collectionName: data.collectionName } }, '*');
+      }
+    };
+  } else {
+    const fullPath = `${data.collectionName}/${data.mode.name}`;
+    deleteModal.value = {
+      visible: true,
+      itemPath: fullPath,
+      itemType: 'Mode',
+      onConfirm: () => {
+        parent.postMessage({ pluginMessage: { type: 'delete-mode', collectionName: data.collectionName, modeId: data.mode.modeId } }, '*');
+      }
+    };
+  }
+};
+
+const openCollectionEditor = (e: MouseEvent, collectionName: string) => {
+  const target = e.currentTarget as HTMLElement;
+  const rect = target.getBoundingClientRect();
+  
+  let left = rect.left;
+  if (left + 220 > window.innerWidth) {
+    left = window.innerWidth - 230;
+  }
+
+  // 對於 Collection，我們允許更改名稱，但目前不提供對其父級（Folder）的更改
+  simpleEditor.value = {
+    visible: true,
+    pos: { top: rect.bottom + 5, left },
+    title: 'Edit Collection',
+    name: collectionName,
+    valueLabel: 'Type',
+    value: 'Variable Collection',
+    options: [],
+    onSave: (newName: string) => {
+      parent.postMessage({ pluginMessage: { type: 'rename-collection', oldName: collectionName, newName } }, '*');
+    }
+  };
+};
+
+const openModeEditor = (e: MouseEvent, collectionName: string, mode: any) => {
+  const target = e.currentTarget as HTMLElement;
+  const rect = target.getBoundingClientRect();
+
+  let left = rect.left;
+  if (left + 220 > window.innerWidth) {
+    left = window.innerWidth - 230;
+  }
+
+  // 獲取所有可選的 Collection 名稱
+  const collectionNames = collections.value.map(c => c.collectionName);
+
+  simpleEditor.value = {
+    visible: true,
+    pos: { top: rect.bottom + 5, left },
+    title: 'Edit Mode',
+    name: mode.name,
+    valueLabel: 'Collection',
+    value: collectionName,
+    options: collectionNames,
+    onSave: (newName: string, newCollection: string) => {
+      // 如果 Collection 改變了，發送到 main.ts 處理移動邏輯
+      if (newCollection !== collectionName) {
+        parent.postMessage({ 
+          pluginMessage: { 
+            type: 'move-mode', 
+            modeId: mode.modeId, 
+            oldCollection: collectionName, 
+            newCollection,
+            newName 
+          } 
+        }, '*');
+      } else {
+        parent.postMessage({ pluginMessage: { type: 'rename-mode', collectionName, modeId: mode.modeId, newName } }, '*');
+      }
+    }
+  };
 };
 
 const allVariables = computed(() => {
@@ -619,18 +837,34 @@ const anyGroupsExpanded = computed(() => {
 
 const selectCollection = (index: number) => {
   activeIndex.value = index;
-  if (collections.value[index]?.modes?.length > 0) {
-    activeMode.value = collections.value[index].modes[0].modeId;
+  const col = collections.value[index];
+  const isEmptyDefaultMode = col?.variables?.length === 0 && col?.modes?.length === 1 && col.modes[0].name === 'Mode 1';
+  if (col?.modes?.length > 0 && !isEmptyDefaultMode) {
+    activeMode.value = col.modes[0].modeId;
+  } else {
+    activeMode.value = null;
   }
 };
 
 const selectMode = (collectionIndex: number, modeId: string) => {
   activeIndex.value = collectionIndex;
   activeMode.value = modeId;
+  const col = collections.value[collectionIndex];
+  if (col?.collectionName) {
+    defaultModeByCollection.value[col.collectionName] = modeId;
+  }
 };
 
 const refresh = () => {
   parent.postMessage({ pluginMessage: { type: 'request-refresh' } }, '*');
+};
+
+const createCollection = () => {
+  parent.postMessage({ pluginMessage: { type: 'create-collection' } }, '*');
+};
+
+const createMode = (collectionName: string) => {
+  parent.postMessage({ pluginMessage: { type: 'create-mode', collectionName } }, '*');
 };
 
 const copyValue = (text: string, label: string) => {
@@ -942,6 +1176,7 @@ onMounted(() => {
   window.onmessage = (event) => {
     const msg = event.data.pluginMessage;
     if (msg && msg.type === 'render-list') {
+      const oldLen = collections.value.length;
       // 映射採集到的數據類型
       const rawCollections = msg.data || [];
       collections.value = rawCollections.map((col: any) => ({
@@ -952,9 +1187,27 @@ onMounted(() => {
         }))
       }));
 
+      // 如果新增了集合且非初始讀取，自動選中並展開
+      if (collections.value.length > oldLen && !isInitialLoading.value) {
+        activeIndex.value = collections.value.length - 1;
+        const newCol = collections.value[activeIndex.value];
+        const isEmptyDefaultMode = newCol?.variables?.length === 0 && newCol?.modes?.length === 1 && newCol.modes[0].name === 'Mode 1';
+        if (newCol.modes?.length > 0 && !isEmptyDefaultMode) {
+          activeMode.value = newCol.modes[0].modeId;
+        } else {
+          activeMode.value = null;
+        }
+        // 展開側邊欄對應項
+        collapsedSidebarFolders.value.delete('flat_' + activeIndex.value);
+      }
+
       // 套用儲存的設定
       if (msg.settings) {
         if (msg.settings.jsonTheme) jsonTheme.value = msg.settings.jsonTheme;
+        if (msg.settings.viewMode) viewMode.value = msg.settings.viewMode;
+        if (msg.settings.defaultModeByCollection) {
+          defaultModeByCollection.value = msg.settings.defaultModeByCollection;
+        }
         
         // 確保整塊正確套用，不被 watch 覆寫
         const savedGithub = { ...githubSettings.value };
@@ -974,8 +1227,17 @@ onMounted(() => {
       if (activeIndex.value >= collections.value.length) {
         activeIndex.value = 0;
       }
-      if (activeCollection.value?.modes?.length > 0 && !activeMode.value) {
-        activeMode.value = activeCollection.value.modes[0].modeId;
+      if (activeCollection.value?.modes?.length > 0) {
+        const isEmptyDefaultMode = activeCollection.value?.variables?.length === 0 && activeCollection.value?.modes?.length === 1 && activeCollection.value.modes[0].name === 'Mode 1';
+        const savedModeId = defaultModeByCollection.value[activeCollection.value.collectionName];
+        const savedExists = savedModeId && activeCollection.value.modes.find((m: any) => m.modeId === savedModeId);
+        if (savedExists) {
+          activeMode.value = savedModeId;
+        } else if (!activeMode.value || !activeCollection.value.modes.find((m: any) => m.modeId === activeMode.value)) {
+          if (!isEmptyDefaultMode) {
+            activeMode.value = activeCollection.value.modes[0].modeId;
+          }
+        }
       }
     }
   };
@@ -1013,9 +1275,10 @@ onMounted(() => {
 
       // Parse glob results
       for (const [path, data] of Object.entries(demoFiles)) {
-        // Path format: ../demo/CollectionName/ModeName.tokens.json
-        const parts = path.split('/');
-        const collectionName = parts[parts.length - 2];
+        // Path format: ../collections/CollectionName/ModeName.tokens.json
+        const trimmed = path.replace(/^\.\.\/collections\//, '');
+        const parts = trimmed.split('/');
+        const collectionName = parts[0];
         const modeName = parts[parts.length - 1].replace('.tokens.json', '');
         const modeId = `m_${collectionName}_${modeName}`;
 
@@ -1052,17 +1315,24 @@ onMounted(() => {
 
 watch(activeCollection, (newCol) => {
   if (newCol?.modes?.length > 0 && (!activeMode.value || !newCol.modes.find((m:any) => m.modeId === activeMode.value))) {
-    activeMode.value = newCol.modes[0].modeId;
+    const isEmptyDefaultMode = newCol?.variables?.length === 0 && newCol?.modes?.length === 1 && newCol.modes[0].name === 'Mode 1';
+    if (!isEmptyDefaultMode) {
+      activeMode.value = newCol.modes[0].modeId;
+    } else {
+      activeMode.value = null;
+    }
   }
 });
 
 // 監聽設定變化並自動儲存
-watch([jsonTheme, githubSettings], ([newTheme, newGithub]) => {
+watch([jsonTheme, viewMode, githubSettings, defaultModeByCollection], ([newTheme, newViewMode, newGithub, newDefaultModes]) => {
   if (isInitialLoading.value) return;
   
   // 使用 toRaw 並進行 JSON 序列化確保移除所有 Proxy 轉為純 JS 物件
   const settingsToSave = JSON.parse(JSON.stringify({ 
     jsonTheme: newTheme,
+    viewMode: newViewMode,
+    defaultModeByCollection: newDefaultModes,
     ...newGithub
   }));
 
@@ -1168,6 +1438,9 @@ const syncPushToGithub = async (pushData: { message: string, branch: string, tas
         @toggle-folder="toggleSidebarFolder"
         @handle-resize="handleSidebarResize"
         @handle-hover="handleSidebarHover"
+        @create-collection="createCollection"
+        @create-mode="createMode"
+        @context-menu="handleContextMenu"
       />
 
 
@@ -1214,8 +1487,11 @@ const syncPushToGithub = async (pushData: { message: string, branch: string, tas
     </div>
 
         <!-- Footer Component -->
+        <!-- 第一碼: 正式版本 -->
+        <!-- 第二碼: 測試版本 -->
+        <!-- 第三碼: 小修改測試版本 -->
         <Footer 
-          version="0.2.1" 
+          version="0.1.2" 
           :github-settings="githubSettings"
           @open-github-settings="isGithubSettingsInAppOpen = true"
           @open-push-modal="isPushModalOpen = true"
@@ -1292,6 +1568,42 @@ const syncPushToGithub = async (pushData: { message: string, branch: string, tas
       :active-collection-index="activeIndex"
       @close="isPushModalOpen = false"
       @push="syncPushToGithub"
+    />
+
+    <!-- Simple Editor for Collections & Modes -->
+    <SimpleEditor 
+      :visible="simpleEditor.visible"
+      :pos="simpleEditor.pos"
+      :title="simpleEditor.title"
+      :name="simpleEditor.name"
+      :value-label="simpleEditor.valueLabel"
+      :value="simpleEditor.value"
+      :options="simpleEditor.options"
+      @close="simpleEditor.visible = false"
+      @save="simpleEditor.onSave"
+    />
+
+    <!-- Context Menu -->
+    <ContextMenu 
+      :visible="contextMenu.visible"
+      :pos="contextMenu.pos"
+      :type="contextMenu.type"
+      :delete-disabled="contextMenu.deleteDisabled"
+      @close="contextMenu.visible = false"
+      @edit="handleEditFromMenu"
+      @delete="handleDeleteFromMenu"
+      @add-mode="() => createMode(contextMenu.data.collectionName)"
+      @duplicate-mode="handleDuplicateFromMenu"
+      @duplicate-collection="handleDuplicateCollectionFromMenu"
+    />
+
+    <!-- Delete Confirm Modal -->
+    <DeleteConfirmModal 
+      :visible="deleteModal.visible"
+      :item-path="deleteModal.itemPath"
+      :item-type="deleteModal.itemType"
+      @close="deleteModal.visible = false"
+      @confirm="deleteModal.onConfirm"
     />
 
   </div>

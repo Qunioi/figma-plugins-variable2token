@@ -54,6 +54,8 @@ export interface TypeFilterOption {
 }
 export interface Settings {
   jsonTheme: string;
+  viewMode?: 'list' | 'grid' | 'json';
+  defaultModeByCollection?: Record<string, string>;
   githubAccount?: {
     token: string;
     username: string;
